@@ -12,7 +12,8 @@
 // Usage: node scripts/test.mjs
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { mavenTimeout, runCommand, withInterrupts } from "./process.mjs";
+import { createReport } from "./report.mjs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -58,9 +59,13 @@ function expand(list, { outputFile, project, suite }) {
   return result;
 }
 
-function run(root, list, values = {}) {
+const report = createReport("maven-integration");
+const timeoutMs = mavenTimeout();
+function run(name, root, list, signal, values = {}) {
   const argv = [...expand(buildSystem.invocation.globalArguments, values), ...expand(list, values)];
-  execFileSync(maven, argv, { cwd: root, stdio: ["ignore", "ignore", "inherit"] });
+  return report.step(name, () => runCommand(maven, argv, {
+    cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+  }));
 }
 
 const scratch = mkdtempSync(join(tmpdir(), "lithe-maven-test-"));
@@ -75,104 +80,110 @@ function capture(name, file) {
   writeFileSync(join(captureDir, name), text);
 }
 let failed = false;
-const check = (name, body) => {
+const check = async (name, body) => {
   try {
-    body();
-    console.log(`✓ ${name}`);
+    await report.step(name, body);
   } catch (error) {
     failed = true;
-    console.error(`✗ ${name}\n${error.stack}`);
+    console.error(error.stack);
   }
 };
 
-try {
-  cpSync(resolve("test", "fixtures", "reactor"), root, { recursive: true });
+async function test(signal) {
+  try {
+    cpSync(resolve("test", "fixtures", "reactor"), root, { recursive: true });
 
-  const modelFile = join(scratch, "model.json");
-  run(root, buildSystem.model.arguments, { outputFile: modelFile });
-  capture("model.json", modelFile);
-  const model = JSON.parse(readFileSync(modelFile, "utf8"));
-  const byName = (name) => model.projects.find((project) => project.name === name);
+    const modelFile = join(scratch, "model.json");
+    await run("read the reactor model", root, buildSystem.model.arguments, signal, { outputFile: modelFile });
+    capture("model.json", modelFile);
+    const model = JSON.parse(readFileSync(modelFile, "utf8"));
+    const byName = (name) => model.projects.find((project) => project.name === name);
 
-  check("the model lists the reactor and its aggregator tree", () => {
-    assert.equal(model.format, "litheBuildModel");
-    assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app"]);
-    assert.equal(byName("reactor").displayName, "Demo Reactor");
-    assert.equal(byName("core").parent, byName("reactor").path);
-    assert.deepEqual(byName("app").properties, {
-      groupId: "demo",
-      artifactId: "app",
-      version: "1.0.0-SNAPSHOT",
-      packaging: "jar",
+    await check("the model lists the reactor and its aggregator tree", () => {
+      assert.equal(model.format, "litheBuildModel");
+      assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app"]);
+      assert.equal(byName("reactor").displayName, "Demo Reactor");
+      assert.equal(byName("core").parent, byName("reactor").path);
+      assert.deepEqual(byName("app").properties, {
+        groupId: "demo",
+        artifactId: "app",
+        version: "1.0.0-SNAPSHOT",
+        packaging: "jar",
+      });
     });
-  });
 
-  check("profiles become choices of the Profiles option", () => {
-    assert.deepEqual(model.optionValues.profiles, ["ci", "release"]);
-  });
-
-  check("plugin goals are model tasks filed under Plugins", () => {
-    const compile = model.tasks.find((task) => task.project === byName("core").path && task.name === "compiler:compile");
-    assert.ok(compile, "core has compiler:compile");
-    assert.equal(compile.template, "plugin-goal");
-    assert.deepEqual(compile.category, ["Plugins", "compiler"]);
-    assert.match(compile.properties.goal, /^org\.apache\.maven\.plugins:maven-compiler-plugin:[^:]+:compile$/);
-    const templates = new Set(buildSystem.tasks.filter((task) => task.fromModel).map((task) => task.id));
-    assert.ok(model.tasks.every((task) => templates.has(task.template)), "every task names a fromModel template");
-  });
-
-  check("jar modules have content roots and the pom aggregator has none", () => {
-    const core = byName("core").path;
-    const kinds = model.contentRoots.filter((entry) => entry.project === core).map((entry) => [entry.kind, entry.path]);
-    assert.deepEqual(kinds.slice(0, 4), [
-      ["source", join(core, "src", "main", "java")],
-      ["resource", join(core, "src", "main", "resources")],
-      ["testSource", join(core, "src", "test", "java")],
-      ["testResource", join(core, "src", "test", "resources")],
-    ]);
-    assert.ok(!model.contentRoots.some((entry) => entry.project === byName("reactor").path));
-  });
-
-  const projectDependencies = join(scratch, "app-dependencies.json");
-  run(root, buildSystem.dependencies.arguments, { outputFile: projectDependencies, project: "app" });
-  capture("app-dependencies.json", projectDependencies);
-  check("a project's tree resolves an uninstalled sibling from the reactor", () => {
-    const tree = JSON.parse(readFileSync(projectDependencies, "utf8"));
-    assert.equal(tree.format, "litheDependencies");
-    assert.deepEqual(tree.dependencies.map((node) => [node.group, node.name, node.scope]), [["demo", "core", "compile"]]);
-  });
-
-  const workspaceDependencies = join(scratch, "dependencies.json");
-  run(root, buildSystem.dependencies.arguments, { outputFile: workspaceDependencies });
-  capture("dependencies.json", workspaceDependencies);
-  check("the workspace tree has one node per project with transitive children", () => {
-    const tree = JSON.parse(readFileSync(workspaceDependencies, "utf8"));
-    assert.deepEqual(tree.dependencies.map((node) => node.name), ["reactor", "core", "app"]);
-    const junit = tree.dependencies[1].children[0];
-    assert.deepEqual([junit.name, junit.version, junit.scope], ["junit", "4.13.2", "test"]);
-    assert.equal(junit.children[0].name, "hamcrest-core");
-  });
-
-  check("reading the model and dependencies builds nothing", () => {
-    for (const directory of ["target", "core/target", "app/target"]) {
-      assert.ok(!existsSync(join(root, directory)), `${directory} was not created`);
-    }
-  });
-
-  run(root, buildSystem.test.arguments, { project: "core", suite: "demo.core.GreeterTest" });
-  check("a filtered test run writes the report the results glob reads", () => {
-    const report = readFileSync(join(root, "core", "target", "surefire-reports", "TEST-demo.core.GreeterTest.xml"), "utf8");
-    assert.match(report, /<testsuite[^>]*name="demo\.core\.GreeterTest"[^>]*tests="2"/);
-  });
-
-  check("without Lithe's properties the extension does nothing", () => {
-    rmSync(join(root, "core", "target"), { recursive: true, force: true });
-    execFileSync(maven, ["-B", "-ntp", "-q", `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
-      cwd: root,
-      stdio: ["ignore", "ignore", "inherit"],
+    await check("profiles become choices of the Profiles option", () => {
+      assert.deepEqual(model.optionValues.profiles, ["ci", "release"]);
     });
-  });
-} finally {
-  rmSync(scratch, { recursive: true, force: true });
+
+    await check("plugin goals are model tasks filed under Plugins", () => {
+      const compile = model.tasks.find((task) => task.project === byName("core").path && task.name === "compiler:compile");
+      assert.ok(compile, "core has compiler:compile");
+      assert.equal(compile.template, "plugin-goal");
+      assert.deepEqual(compile.category, ["Plugins", "compiler"]);
+      assert.match(compile.properties.goal, /^org\.apache\.maven\.plugins:maven-compiler-plugin:[^:]+:compile$/);
+      const templates = new Set(buildSystem.tasks.filter((task) => task.fromModel).map((task) => task.id));
+      assert.ok(model.tasks.every((task) => templates.has(task.template)), "every task names a fromModel template");
+    });
+
+    await check("jar modules have content roots and the pom aggregator has none", () => {
+      const core = byName("core").path;
+      const kinds = model.contentRoots.filter((entry) => entry.project === core).map((entry) => [entry.kind, entry.path]);
+      assert.deepEqual(kinds.slice(0, 4), [
+        ["source", join(core, "src", "main", "java")],
+        ["resource", join(core, "src", "main", "resources")],
+        ["testSource", join(core, "src", "test", "java")],
+        ["testResource", join(core, "src", "test", "resources")],
+      ]);
+      assert.ok(!model.contentRoots.some((entry) => entry.project === byName("reactor").path));
+    });
+
+    const projectDependencies = join(scratch, "app-dependencies.json");
+    await run("read project dependencies", root, buildSystem.dependencies.arguments, signal, { outputFile: projectDependencies, project: "app" });
+    capture("app-dependencies.json", projectDependencies);
+    await check("a project's tree resolves an uninstalled sibling from the reactor", () => {
+      const tree = JSON.parse(readFileSync(projectDependencies, "utf8"));
+      assert.equal(tree.format, "litheDependencies");
+      assert.deepEqual(tree.dependencies.map((node) => [node.group, node.name, node.scope]), [["demo", "core", "compile"]]);
+    });
+
+    const workspaceDependencies = join(scratch, "dependencies.json");
+    await run("read workspace dependencies", root, buildSystem.dependencies.arguments, signal, { outputFile: workspaceDependencies });
+    capture("dependencies.json", workspaceDependencies);
+    await check("the workspace tree has one node per project with transitive children", () => {
+      const tree = JSON.parse(readFileSync(workspaceDependencies, "utf8"));
+      assert.deepEqual(tree.dependencies.map((node) => node.name), ["reactor", "core", "app"]);
+      const junit = tree.dependencies[1].children[0];
+      assert.deepEqual([junit.name, junit.version, junit.scope], ["junit", "4.13.2", "test"]);
+      assert.equal(junit.children[0].name, "hamcrest-core");
+    });
+
+    await check("reading the model and dependencies builds nothing", () => {
+      for (const directory of ["target", "core/target", "app/target"]) {
+        assert.ok(!existsSync(join(root, directory)), `${directory} was not created`);
+      }
+    });
+
+    await run("run the filtered Maven test suite", root, buildSystem.test.arguments, signal, { project: "core", suite: "demo.core.GreeterTest" });
+    await check("a filtered test run writes the report the results glob reads", () => {
+      const report = readFileSync(join(root, "core", "target", "surefire-reports", "TEST-demo.core.GreeterTest.xml"), "utf8");
+      assert.match(report, /<testsuite[^>]*name="demo\.core\.GreeterTest"[^>]*tests="2"/);
+    });
+
+    await check("without Lithe's properties the extension does nothing", async () => {
+      rmSync(join(root, "core", "target"), { recursive: true, force: true });
+      await runCommand(maven, ["-B", "-ntp", "-q", `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
+        cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+      });
+    });
+  } catch (error) {
+    failed = true;
+    report.failure("integration lane failed", error);
+    console.error(error.stack);
+  } finally {
+    try { await report.step("remove the scratch reactor", () => rmSync(scratch, { recursive: true, force: true })); }
+    finally { report.write(); }
+  }
+  process.exitCode = failed ? 1 : 0;
 }
-process.exit(failed ? 1 : 0);
+await withInterrupts(test);

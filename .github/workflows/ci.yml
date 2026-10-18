@@ -26,6 +26,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Check script process deadlines and cleanup
+        run: node scripts/test-process.mjs
       - name: Check manifest and build the archive
         run: node scripts/package.mjs
       - name: Download Maven ${{ matrix.maven }}
@@ -57,3 +59,10 @@ jobs:
             }
             process.exit(failed ? 1 : 0);
           "
+      - name: Upload script timing reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-timings-maven-${{ matrix.maven }}
+          path: .artifacts/test-stability/
+          if-no-files-found: warn
