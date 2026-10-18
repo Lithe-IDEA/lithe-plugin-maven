@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag v<version> matching plugin.json to publish a GitHub Release.
+# Lithe Store's tracker picks up the release and opens an index pull request.
+# A tag with a pre-release suffix is not used; mark a trial release as a
+# pre-release in the GitHub UI after it is published.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build the archive
+        run: node scripts/package.mjs --expect-tag "$GITHUB_REF_NAME" | tee "$RUNNER_TEMP/checksums.txt"
+      - name: Run the declared commands with Maven
+        run: node scripts/test.mjs
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "安装：在 Lithe 的插件市场（已预置 Lithe Store 源 https://github.com/Lithe-IDEA/Lithe-store）搜索 Maven。"
+            echo
+            echo "SHA-256："
+            echo '```'
+            sed 's#^dist/##' "$RUNNER_TEMP/checksums.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

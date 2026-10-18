@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The runner's Maven, and the oldest version plugin.json accepts.
+        maven: [runner, 3.6.3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Check manifest and build the archive
+        run: node scripts/package.mjs
+      - name: Download Maven ${{ matrix.maven }}
+        if: matrix.maven != 'runner'
+        env:
+          VERSION: ${{ matrix.maven }}
+        run: |
+          base="https://archive.apache.org/dist/maven/maven-3/$VERSION/binaries/apache-maven-$VERSION-bin.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/maven.tar.gz" "$base"
+          echo "$(curl -fsSL "$base.sha512" | cut -d' ' -f1)  $RUNNER_TEMP/maven.tar.gz" | sha512sum -c -
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "MVN=$RUNNER_TEMP/apache-maven-$VERSION/bin/mvn" >> "$GITHUB_ENV"
+      - name: Run the declared commands with Maven
+        run: node scripts/test.mjs
+      - name: Validate against Lithe Store rules
+        if: matrix.maven == 'runner'
+        run: |
+          git clone --depth 1 https://github.com/Lithe-IDEA/Lithe-store "$RUNNER_TEMP/store"
+          node --input-type=module -e "
+            import { readPackageManifests, checkManifest } from '$RUNNER_TEMP/store/scripts/validate-index.mjs';
+            import { readdirSync, readFileSync } from 'node:fs';
+            const manifest = JSON.parse(readFileSync('io.github.lithe-idea.maven-build/plugin.json', 'utf8'));
+            const entry = { id: manifest.id };
+            let failed = false;
+            for (const name of readdirSync('dist').filter((name) => name.endsWith('.zip'))) {
+              const { manifests, unsafe } = readPackageManifests('dist/' + name, entry.id);
+              const problems = [...unsafe, ...checkManifest(manifests, entry, manifest)];
+              for (const problem of problems) { console.error(name + ': ' + problem); failed = true; }
+            }
+            process.exit(failed ? 1 : 0);
+          "
