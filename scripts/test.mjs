@@ -6,11 +6,14 @@
 // Run scripts/package.mjs first. MVN selects the Maven executable (default
 // `mvn`), so CI can also check the oldest supported Maven.
 //
+// LITHE_CAPTURE_DIR=<dir> also copies the documents there, with the
+// scratch workspace written as `${workspace}`, for Lithe's Core tests.
+//
 // Usage: node scripts/test.mjs
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -62,6 +65,15 @@ function run(root, list, values = {}) {
 
 const scratch = mkdtempSync(join(tmpdir(), "lithe-maven-test-"));
 const root = join(scratch, "reactor");
+const captureDir = process.env.LITHE_CAPTURE_DIR;
+function capture(name, file) {
+  if (!captureDir) return;
+  let text = readFileSync(file, "utf8");
+  // The real path first: on macOS it extends the temporary path.
+  for (const prefix of new Set([realpathSync(root), root])) text = text.replaceAll(prefix, "${workspace}");
+  mkdirSync(captureDir, { recursive: true });
+  writeFileSync(join(captureDir, name), text);
+}
 let failed = false;
 const check = (name, body) => {
   try {
@@ -78,6 +90,7 @@ try {
 
   const modelFile = join(scratch, "model.json");
   run(root, buildSystem.model.arguments, { outputFile: modelFile });
+  capture("model.json", modelFile);
   const model = JSON.parse(readFileSync(modelFile, "utf8"));
   const byName = (name) => model.projects.find((project) => project.name === name);
 
@@ -122,6 +135,7 @@ try {
 
   const projectDependencies = join(scratch, "app-dependencies.json");
   run(root, buildSystem.dependencies.arguments, { outputFile: projectDependencies, project: "app" });
+  capture("app-dependencies.json", projectDependencies);
   check("a project's tree resolves an uninstalled sibling from the reactor", () => {
     const tree = JSON.parse(readFileSync(projectDependencies, "utf8"));
     assert.equal(tree.format, "litheDependencies");
@@ -130,6 +144,7 @@ try {
 
   const workspaceDependencies = join(scratch, "dependencies.json");
   run(root, buildSystem.dependencies.arguments, { outputFile: workspaceDependencies });
+  capture("dependencies.json", workspaceDependencies);
   check("the workspace tree has one node per project with transitive children", () => {
     const tree = JSON.parse(readFileSync(workspaceDependencies, "utf8"));
     assert.deepEqual(tree.dependencies.map((node) => node.name), ["reactor", "core", "app"]);
