@@ -82,7 +82,28 @@ node scripts/package.mjs
 node scripts/test.mjs
 ```
 
-`MVN=/path/to/mvn node scripts/test.mjs` 可以换一个 Maven 版本测试。
+`MVN=/path/to/mvn` 可为打包和测试指定 Maven 版本。脚本在 macOS/Linux 上运行；每次 Maven 调用默认限时 120 秒，
+可用 `LITHE_MAVEN_TIMEOUT_MS` 调整（1–600000 毫秒）；`zip` 限时 30 秒。到期或收到 SIGINT/SIGTERM 时，
+脚本会终止本次启动的进程组，500 毫秒后升级为 SIGKILL，再最多等待 2 秒并报告清理失败。
+每个命令和检查的耗时、结果会写入 `.artifacts/test-stability/` 的 JSON、JUnit XML 和 HTML；
+`LITHE_REPORT_DIR` 可以指定其他报告目录。真实 Maven 测试是依赖本机工具及 Maven 仓库的集成测试。
+
+Node 子进程回归不需要 Maven 或联网，覆盖拒绝 SIGTERM 的子孙进程、父进程先退出、异常退出和中断清理：
+
+```bash
+node scripts/test-process.mjs
+```
+
+要验证打包/测试前后已有插件、ZIP 和宿主 bundle 的文件清单及 SHA-256 不变，可运行：
+
+```bash
+node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
+```
+
+`--host-bundle` 可以重复传入，以同时检查其他宿主实例。该验证器在临时源码副本中重新打包并测试，
+保留原有 `dist/`，将新包、前后清单和逐项计时保存在 `.artifacts/script-verification/run-*/`，最后清理临时目录。
+这只验证本次脚本工作流；宿主 UI 的实机验收需要另外执行。
+
 在 Lithe 开发版中，通过 **设置 → 插件 → ⚙ → 从磁盘安装插件…** 选择 `dist/package/io.github.lithe-idea.maven-build`
 即可安装本地开发包（发行版 Lithe 不加载未签名的开发包）。
 

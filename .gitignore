@@ -1,3 +1,4 @@
 dist/
+.artifacts/
 extension/target/
 .DS_Store

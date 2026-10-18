@@ -9,7 +9,8 @@
 //
 // Usage: node scripts/package.mjs [--expect-tag <tag>]
 
-import { execFileSync } from "node:child_process";
+import { mavenTimeout, runCommand, withInterrupts, ZIP_TIMEOUT_MS } from "./process.mjs";
+import { createReport } from "./report.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -55,20 +56,39 @@ function assertNoLinks(directory) {
   }
 }
 
-execFileSync("mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { stdio: "inherit" });
-if (!existsSync(EXTENSION_JAR)) throw new Error(`${EXTENSION_JAR} was not built`);
+const report = createReport("package");
+const timeoutMs = mavenTimeout();
+await withInterrupts(async (signal) => {
+  try {
+    await report.step("build the Maven extension", async () => {
+      await runCommand(process.env.MVN ?? "mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { timeoutMs, signal });
+      if (!existsSync(EXTENSION_JAR)) throw new Error(`${EXTENSION_JAR} was not built`);
+    });
 
-rmSync("dist", { recursive: true, force: true });
-const packageRoot = join(PACKAGE_ROOT, PACKAGE_DIR);
-cpSync(PACKAGE_DIR, packageRoot, { recursive: true });
-mkdirSync(join(packageRoot, "lib"), { recursive: true });
-cpSync(EXTENSION_JAR, join(packageRoot, "lib", "lithe-maven-extension.jar"));
-cpSync("LICENSE", join(packageRoot, "LICENSE"));
-cpSync("NOTICE", join(packageRoot, "NOTICE"));
-assertNoLinks(packageRoot);
+    await report.step("assemble the plugin package", () => {
+      signal.throwIfAborted();
+      rmSync("dist", { recursive: true, force: true });
+      const packageRoot = join(PACKAGE_ROOT, PACKAGE_DIR);
+      cpSync(PACKAGE_DIR, packageRoot, { recursive: true });
+      mkdirSync(join(packageRoot, "lib"), { recursive: true });
+      cpSync(EXTENSION_JAR, join(packageRoot, "lib", "lithe-maven-extension.jar"));
+      cpSync("LICENSE", join(packageRoot, "LICENSE"));
+      cpSync("NOTICE", join(packageRoot, "NOTICE"));
+      assertNoLinks(packageRoot);
+    });
 
-const asset = resolve("dist", `${ASSET_PREFIX}-${manifest.version}-${PLATFORM}.zip`);
-// -X drops extra file attributes; -y stores a symbolic link as a link so
-// Lithe refuses it instead of the archive silently carrying its target.
-execFileSync("zip", ["-qrXy", asset, PACKAGE_DIR, "-x", "*.DS_Store"], { cwd: PACKAGE_ROOT });
-console.log(`dist/${ASSET_PREFIX}-${manifest.version}-${PLATFORM}.zip ${sha256(asset)}`);
+    const asset = resolve("dist", `${ASSET_PREFIX}-${manifest.version}-${PLATFORM}.zip`);
+    // -X drops extra file attributes; -y stores a symbolic link as a link so
+    // Lithe refuses it instead of the archive silently carrying its target.
+    await report.step("archive the plugin package", () => runCommand("zip", ["-qrXy", asset, PACKAGE_DIR, "-x", "*.DS_Store"], {
+      cwd: PACKAGE_ROOT, timeoutMs: ZIP_TIMEOUT_MS, signal,
+    }));
+    console.log(`dist/${ASSET_PREFIX}-${manifest.version}-${PLATFORM}.zip ${sha256(asset)}`);
+  } catch (error) {
+    report.failure("packaging lane failed", error);
+    console.error(error.stack);
+    process.exitCode = 1;
+  } finally {
+    report.write();
+  }
+});
