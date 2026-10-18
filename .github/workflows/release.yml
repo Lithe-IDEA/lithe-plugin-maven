@@ -2,8 +2,8 @@ name: Release
 
 # Push a tag v<version> matching plugin.json to publish a GitHub Release.
 # Lithe Store's tracker picks up the release and opens an index pull request.
-# A tag with a pre-release suffix is not used; mark a trial release as a
-# pre-release in the GitHub UI after it is published.
+# v0.1.0 is a trial release: publish it as a pre-release from the start.
+# Keep the plain v<version> tag required by the package and Store tracker.
 on:
   push:
     tags: ["v*"]
@@ -40,4 +40,8 @@ jobs:
             sed 's#^dist/##' "$RUNNER_TEMP/checksums.txt"
             echo '```'
           } > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == "v0.1.0" ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${release_flags[@]}"

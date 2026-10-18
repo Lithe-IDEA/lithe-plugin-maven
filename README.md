@@ -99,8 +99,8 @@ node scripts/test.mjs
    git tag v0.2.0 && git push origin v0.2.0
    ```
 
-3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。
-4. Lithe Store 的自动追踪会发现新版本并开合并请求，合并后用户即可在 Lithe 中更新。
+3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。首个 `v0.1.0` 会自动标为预发布版本，需要包含 `buildSystems` 接口的 Lithe 开发版。
+4. Lithe Store 的自动追踪会发现稳定版本并开合并请求，合并后用户即可在 Lithe 中更新。自动追踪会跳过预发布版本；`v0.1.0` 需要在 Store 中手工提交条目，并使用已发布 ZIP 的实际 SHA-256。
 
 ## 许可
 
