@@ -1,9 +1,9 @@
 name: Release
 
 # Push a tag v<version> matching plugin.json to publish a GitHub Release.
-# Lithe Store's tracker picks up the release and opens an index pull request.
-# v0.1.0 is a trial release: publish it as a pre-release from the start.
-# Keep the plain v<version> tag required by the package and Store tracker.
+# Lithe Store's tracker picks up stable releases and opens index pull requests.
+# v0.1.0 is a trial release: publish it as a pre-release from the start; it
+# needs a manually submitted Store entry. Keep the plain v<version> tag.
 on:
   push:
     tags: ["v*"]
@@ -33,7 +33,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "安装：在 Lithe 的插件市场（已预置 Lithe Store 源 https://github.com/Lithe-IDEA/Lithe-store）搜索 Maven。"
+            echo "兼容性：需要基于 Lithe preview、包含 buildSystems 插件接口及原生构建窗口支持的开发版；宿主支持 PR 合并前，请使用包含该改动的开发构建。"
+            echo
+            if [[ "$GITHUB_REF_NAME" == "v0.1.0" ]]; then
+              echo "v0.1.0 是预发布版本，Lithe Store 自动追踪会跳过；需要手工提交插件条目。"
+              echo
+            fi
+            echo "安装：Lithe Store（https://github.com/Lithe-IDEA/Lithe-store）中的 Maven 条目合并后，才可在兼容开发版的 设置 → 插件 → 插件市场 中搜索 Maven 并安装。"
             echo
             echo "SHA-256："
             echo '```'

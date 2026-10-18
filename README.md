@@ -9,7 +9,7 @@
 > plugin goals, profiles, test runs with JUnit reports, compiler diagnostics and the dependency tree. It runs your own
 > Maven with a small bundled core extension that only reads the reactor.
 
-> **试用版**：`buildSystems` 接口还在 Lithe 的预览分支上，0.1.0 作为预发布版本提供，需要包含该接口的 Lithe 开发版。
+> **试用版**：0.1.0 作为预发布版本提供，需要基于 Lithe `preview`、包含 `buildSystems` 插件接口及原生构建窗口支持的开发版。宿主支持 PR 合并前，请使用包含该改动的开发构建。
 
 ## 功能
 
@@ -53,7 +53,7 @@ brew install maven
 
 ## 安装
 
-在 Lithe 中打开 **设置 → 插件 → 插件市场**，搜索 “Maven”，安装并按提示重启。
+Lithe Store 的 Maven 条目合并后，才可在上述兼容开发版中打开 **设置 → 插件 → 插件市场**，搜索 “Maven”，安装并按提示重启。
 Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先在 **⚙ → 管理插件仓库…** 中重新添加
 `https://github.com/Lithe-IDEA/Lithe-store`。
 
