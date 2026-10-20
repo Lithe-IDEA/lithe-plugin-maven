@@ -32,18 +32,6 @@ jobs:
             17
       - name: Check script process deadlines and cleanup
         run: node scripts/test-process.mjs
-      # Until 1lck/Lithe-IDEA tags sdk-java-v<version>, sdk.lock.json pins no
-      # SHA-256 and package.mjs needs LITHE_SDK_JAR: build it from source.ref.
-      # Remove this step once the lock pins the released JAR.
-      - name: Build the unreleased plugin SDK
-        run: |
-          if [ "$(node -p 'require("./sdk.lock.json").sha256')" != "null" ]; then exit 0; fi
-          repository=$(node -p 'require("./sdk.lock.json").source.repository')
-          ref=$(node -p 'require("./sdk.lock.json").source.ref')
-          git clone --depth 1 --filter=blob:none --sparse --branch "$ref" "$repository" "$RUNNER_TEMP/lithe"
-          git -C "$RUNNER_TEMP/lithe" sparse-checkout set sdk/java
-          mvn -B -ntp -q -f "$RUNNER_TEMP/lithe/$(node -p 'require("./sdk.lock.json").source.pom')" -DskipTests package
-          echo "LITHE_SDK_JAR=$RUNNER_TEMP/lithe/$(node -p 'require("./sdk.lock.json").source.jar')" >> "$GITHUB_ENV"
       - name: Check manifest and build the archive
         run: node scripts/package.mjs
       - name: Test the build provider's snapshot with a fake Maven (Java 17)
