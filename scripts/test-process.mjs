@@ -90,7 +90,7 @@ await withInterrupts(async (signal) => {
         assertGone(records, 3);
       }));
     }
-    await check("missing and malformed command output fail both the lane and its reports", async () => {
+    await check("a provider that cannot start or answers garbage fails both the lane and its reports", async () => {
       const cwd = join(scratch, "invalid-output");
       mkdirSync(cwd);
       mkdirSync(join(cwd, "test/fixtures/reactor"), { recursive: true });
@@ -99,15 +99,16 @@ await withInterrupts(async (signal) => {
       mkdirSync(join(plugin, "lib"), { recursive: true });
       cpSync(join(packageId, "plugin.json"), join(plugin, "plugin.json"));
       writeFileSync(join(plugin, "lib/lithe-maven-extension.jar"), "test placeholder");
-      const fake = join(cwd, "fake-maven.mjs");
-      cpSync(resolve("test/fixtures/fake-maven.mjs"), fake);
+      writeFileSync(join(plugin, "lib/lithe-maven-backend.jar"), "test placeholder");
+      const fake = join(cwd, "fake-java.mjs");
+      cpSync(resolve("test/fixtures/fake-java.mjs"), fake);
       chmodSync(fake, 0o755);
       const temporary = join(cwd, "tmp");
       mkdirSync(temporary);
-      for (const mode of ["missing", "malformed"]) {
+      for (const mode of ["exit", "malformed"]) {
         const reports = join(cwd, mode);
         await assert.rejects(runCommand(process.execPath, [resolve("scripts/test.mjs")], {
-          cwd, env: { ...process.env, MVN: fake, FAKE_MAVEN_MODE: mode, TMPDIR: temporary, LITHE_REPORT_DIR: reports },
+          cwd, env: { ...process.env, LITHE_TEST_JAVA: fake, FAKE_JAVA_MODE: mode, TMPDIR: temporary, LITHE_REPORT_DIR: reports },
           stdio: "ignore", timeoutMs: 5_000, graceMs: 4_000,
         }), /status 1/);
         const result = JSON.parse(readFileSync(join(reports, "maven-integration.json"), "utf8"));

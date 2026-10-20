@@ -1,0 +1,12 @@
+{
+  "comment": "Lithe Java plugin SDK shaded into lib/lithe-maven-backend.jar. scripts/package.mjs downloads url and refuses a JAR whose SHA-256 differs. sha256 stays null until 1lck/Lithe-IDEA tags sdk-java-v0.1.0; until then set LITHE_SDK_JAR to a JAR built from source.ref (README, Development).",
+  "version": "0.1.0",
+  "url": "https://github.com/1lck/Lithe-IDEA/releases/download/sdk-java-v0.1.0/lithe-plugin-sdk-java-0.1.0.jar",
+  "sha256": null,
+  "source": {
+    "repository": "https://github.com/1lck/Lithe-IDEA",
+    "ref": "feat/1351-java-sdk",
+    "pom": "sdk/java/pom.xml",
+    "jar": "sdk/java/plugin-sdk/target/lithe-plugin-sdk-java-0.1.0.jar"
+  }
+}
