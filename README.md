@@ -1,6 +1,6 @@
 # Maven for Lithe
 
-为 [Lithe](https://github.com/Lithe-IDEA/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
+为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
 这是一个**社区插件**，用 Lithe 的声明式构建系统接口（插件 API 3 的 `buildSystems`）实现，
 除了下面说的一个 Maven 扩展 jar，没有任何宿主代码。
@@ -108,7 +108,7 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 即可安装本地开发包（发行版 Lithe 不加载未签名的开发包）。
 
 `plugin.json` 的完整格式见 Lithe 的
-[插件契约](https://github.com/Lithe-IDEA/Lithe-IDEA/blob/preview/shared/contracts/plugins/v1/README.md)
+[插件契约](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/plugins/v1/README.md)
 和 Lithe Store 的[构建工具接入指南](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/build-tool-integration.md)。
 
 ## 发布新版本
