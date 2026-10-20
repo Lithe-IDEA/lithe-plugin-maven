@@ -39,10 +39,10 @@ const unchanged = (name) => {
 
 await withInterrupts(async (signal) => {
   try {
-    for (const path of [packageId, "scripts", "extension", "test", "LICENSE", "NOTICE"]) {
+    for (const path of [packageId, "scripts", "extension", "backend", "sdk.lock.json", "test", "LICENSE", "NOTICE"]) {
       cpSync(resolve(path), join(scratch, path), {
         recursive: true,
-        filter: (source) => source !== resolve("extension/target"),
+        filter: (source) => source !== resolve("extension/target") && source !== resolve("backend/target"),
       });
     }
     const timeoutMs = mavenTimeout();

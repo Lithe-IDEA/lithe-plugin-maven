@@ -3,11 +3,12 @@
 为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
 这是一个**社区插件**，用 Lithe 的声明式构建系统接口（插件 API 3 的 `buildSystems`）实现，
-除了下面说的一个 Maven 扩展 jar，没有任何宿主代码。
+除了下面说的 Maven 扩展 jar 和读取项目用的 Java 后端，没有任何宿主代码。
 
 > English: Maven support for Lithe through the declarative `buildSystems` plugin API — project tree, lifecycle and
 > plugin goals, profiles, test runs with JUnit reports, compiler diagnostics and the dependency tree. It runs your own
-> Maven with a small bundled core extension that only reads the reactor.
+> Maven with a small bundled core extension that only reads the reactor, from a Java build provider that keeps the
+> result in a snapshot, so reopening a project does not run Maven again until a POM or setting changes.
 
 > **试用版**：0.1.0 作为预发布版本提供，需要基于 Lithe `preview`、包含 `buildSystems` 插件接口及原生构建窗口支持的开发版。宿主支持 PR 合并前，请使用包含该改动的开发构建。
 
@@ -22,7 +23,8 @@
 | 选项 | Profiles（从反应堆、父 POM 和 settings.xml 读取，可手动补充）、Settings 文件、本地仓库；工具栏开关 Offline（`-o`）和 Skip Tests（`-DskipTests`） |
 | 测试 | 运行模块、测试类或单个方法，读取 Surefire/Failsafe 的 JUnit XML 报告 |
 | 诊断 | 把编译输出中的 `[ERROR]`/`[WARNING] 文件:[行,列]` 显示为问题 |
-| 依赖 | 按模块显示依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析 |
+| 依赖 | 按模块显示依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析；一次 Maven 运行读出全部模块，展开模块不再各跑一次 |
+| 快照 | 项目和依赖保存在工作区状态目录，重新打开项目时直接显示；POM、`.mvn/` 配置、settings.xml、选项或 Maven/Java 变化后才重新运行 Maven，Reload 总是重新运行 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
 
 ## 依赖的程序
@@ -33,7 +35,7 @@
 2. 环境变量 `MAVEN_HOME` 下的 `bin/mvn`；
 3. `PATH` 里的 `mvn`。
 
-要求 Maven 3.6.3 或更新版本、Java 8 或更新版本。没有 Maven 的话可以先安装：
+要求 Maven 3.6.3 或更新版本、Java 8 或更新版本（读取项目的后端也用 Lithe 找到的这个 Java 运行）。没有 Maven 的话可以先安装：
 
 ```bash
 brew install maven
@@ -41,13 +43,21 @@ brew install maven
 
 ## 工作方式
 
-读取项目和依赖时，插件用 `-Dmaven.ext.class.path` 给你的 Maven 加载随包提供的
-`lib/lithe-maven-extension.jar`（源码在 `extension/`），运行一个没有默认绑定的阶段 `pre-clean`：
+读取项目和依赖由插件的构建后端 `lib/lithe-maven-backend.jar`（源码在 `backend/`）负责。Lithe 在第一次需要
+项目模型时用 Java 启动它，工作区关闭时结束它：
 
-- 扩展在 Maven 读完反应堆后，把模块、内容根、插件目标和 Profiles 写成 Lithe 的 `litheBuildModel` 文档；
-  依赖则写成 `litheDependencies` 文档。文件位置由 Lithe 指定（`-Dlithe.modelOutput` / `-Dlithe.dependenciesOutput`）。
+- 需要重新读取时，后端用 `-Dmaven.ext.class.path` 给你的 Maven 加载随包提供的
+  `lib/lithe-maven-extension.jar`（源码在 `extension/`），运行一个没有默认绑定的阶段 `pre-clean`。
+  扩展在 Maven 读完反应堆后，把模块、内容根、插件目标和 Profiles 写成 Lithe 的 `litheBuildModel` 文档，
+  同时把**每个模块**的依赖树写成 `litheDependencies` 文档（`-Dlithe.modelOutput` / `-Dlithe.dependenciesOutput`）。
+- 结果连同输入指纹保存在 Lithe 给这个工作区的状态目录里的 `maven-snapshot.json`。指纹包含根目录下所有
+  `pom.xml`（跳过 `target/`、`.git/`、`node_modules/`）、`.mvn/maven.config`、`extensions.xml`、`jvm.config`、
+  Wrapper 配置、用户和全局 `settings.xml`、`-s` 指定的文件、选项、Maven 可执行文件及其修改时间、Java 版本和扩展版本。
+  指纹不变时，重新打开项目或展开模块直接用快照，不启动 Maven。
+- 同时到达的请求共用一次 Maven 运行；全部请求都取消后才结束 Maven。运行期间 POM 被修改时，本次结果照常显示但不保存。
+- 指纹看不到的变化（例如根目录外的父 POM、远程仓库里更新的 SNAPSHOT）请点 Reload，它总是重新运行 Maven。
 - 不会编译或打包，也不会生成 `target/`；解析依赖时只读 POM，不下载依赖 jar。
-- 没有这些属性时扩展什么都不做；插件目录在运行时保持只读。
+- 没有 Lithe 的属性时扩展什么都不做；插件目录在运行时保持只读。
 
 读取项目会执行 POM 中声明的 Maven 扩展和插件，首次读取还可能联网下载插件描述，所以 Lithe 会先确认你信任这个工作区。
 
@@ -65,14 +75,35 @@ Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先�
 io.github.lithe-idea.maven-build/plugin.json   # 插件描述，目录名必须等于插件 id
 io.github.lithe-idea.maven-build/icons/        # 工具窗口和工具栏图标（来源见 NOTICE）
 extension/                                     # Maven 核心扩展，导出模型和依赖树
+backend/                                       # 构建后端（Java 8，Lithe 插件 SDK），快照和 Maven 运行
+sdk.lock.json                                  # 打进后端的 Lithe Java 插件 SDK：版本、下载地址、SHA-256
 test/fixtures/reactor/                         # 三个模块的示例反应堆，供集成测试使用
 scripts/package.mjs                            # 构建扩展并打包成 dist/maven-build-<版本>-darwin.zip
-scripts/test.mjs                               # 用真实 Maven 运行清单里的命令并检查输出
+scripts/test.mjs                               # 用真实 Maven 经后端读取项目、运行清单里的命令并检查输出
+scripts/test-backend.mjs                       # 用假 Maven 计数，检查快照命中、失效、刷新、合并运行和取消
 .github/workflows/ci.yml                       # PR 时打包、用 Maven 3.6.3 和最新版测试，并用 Lithe Store 的规则检查
 .github/workflows/release.yml                  # 推送 v<版本> 标签时发布 GitHub Release
 ```
 
-本地需要 Node.js 22+、JDK 8+ 和 Maven（还需要 `zip`）：
+本地需要 Node.js 22+、JDK（CI 用 17；扩展和后端都按 Java 8 编译，后端运行只需 Java 8）和 Maven（还需要 `zip`）。
+
+后端打进 Lithe 的 Java 插件 SDK。打包脚本按 `sdk.lock.json` 下载 SDK JAR 到 `.cache/sdk/`，SHA-256 不符就拒绝。
+SDK 的第一个版本（`sdk-java-v0.1.0`）发布前，锁文件还没有 SHA-256，需要从
+[1lck/Lithe-IDEA#1379](https://github.com/1lck/Lithe-IDEA/pull/1379) 的分支自行构建，再用 `LITHE_SDK_JAR` 指定：
+
+```bash
+mvn -B -f sdk/java/pom.xml verify
+```
+
+（在 Lithe-IDEA 仓库里运行，产出 `sdk/java/plugin-sdk/target/lithe-plugin-sdk-java-0.1.0.jar`。）
+锁文件有 SHA-256 后，`LITHE_SDK_JAR` 指向的 JAR 也必须与之相同；发布（`--expect-tag`）不接受 `LITHE_SDK_JAR`。
+
+```bash
+LITHE_SDK_JAR=/path/to/lithe-plugin-sdk-java-0.1.0.jar node scripts/package.mjs
+```
+
+SDK 发布后直接运行：
+
 
 ```bash
 node scripts/package.mjs
@@ -80,6 +111,13 @@ node scripts/package.mjs
 
 ```bash
 node scripts/test.mjs
+```
+
+后端的快照行为不需要 Maven，用假 Maven 计数验证；`LITHE_TEST_JAVA=/path/to/java` 可指定运行后端的 Java
+（CI 用 Java 8 和 17 各跑一次，`test.mjs` 同样读取这个变量）：
+
+```bash
+node scripts/test-backend.mjs
 ```
 
 `MVN=/path/to/mvn` 可为打包和测试指定 Maven 版本。脚本在 macOS/Linux 上运行；每次 Maven 调用默认限时 120 秒，
@@ -113,7 +151,8 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 
 ## 发布新版本
 
-1. 同时修改 `plugin.json` 和 `extension/pom.xml` 的版本（例如 `0.2.0`；打包脚本会检查两者一致），合入 `main`。
+1. 同时修改 `plugin.json`、`extension/pom.xml` 和 `backend/pom.xml` 的版本（例如 `0.2.0`；打包脚本会检查三者一致），
+   确认 `sdk.lock.json` 已填入正式发布的 SDK 地址和 SHA-256，合入 `main`。
 2. 推送同名标签：
 
    ```bash

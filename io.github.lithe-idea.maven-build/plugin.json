@@ -4,13 +4,13 @@
   "displayName": "Maven",
   "version": "0.1.0",
   "pluginAPIVersion": 3,
-  "requires": { "buildSystems": 1 },
+  "requires": { "buildProviders": 1, "buildSystems": 1, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
     "signatureRequirement": "none"
   },
-  "permissions": ["process.build"],
+  "permissions": ["languageServer.launch", "process.build"],
   "activationEvents": ["onBuildSystem:maven"],
   "languages": [],
   "buildSystems": [
@@ -87,18 +87,18 @@
           "arguments": ["-DskipTests"]
         }
       ],
-      "model": {
-        "source": "command",
-        "arguments": [
-          "-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar",
-          "-Dlithe.modelOutput=${outputFile}",
-          "pre-clean"
-        ],
-        "output": "outputFile",
-        "decoder": "litheBuildModel",
+      "provider": {
+        "launch": {
+          "kind": "runtime",
+          "tool": "java",
+          "minimumVersion": "8",
+          "entry": "lib/lithe-maven-backend.jar"
+        },
+        "arguments": ["--state", "${workspaceStateDir}"],
         "executesProjectCode": true,
         "mayUseNetwork": true
       },
+      "model": { "source": "provider" },
       "tasks": [
         {
           "id": "clean",
@@ -280,20 +280,7 @@
           }
         ]
       },
-      "dependencies": {
-        "source": "command",
-        "scopes": ["workspace", "project"],
-        "arguments": [
-          "-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar",
-          "-Dlithe.dependenciesOutput=${outputFile}",
-          { "value": "-Dlithe.dependenciesProject=${project.path}", "when": "projectSelected" },
-          "pre-clean"
-        ],
-        "output": "outputFile",
-        "decoder": "litheDependencies",
-        "executesProjectCode": true,
-        "mayUseNetwork": true
-      },
+      "dependencies": { "source": "provider", "scopes": ["workspace", "project"] },
       "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", "pom.xml"] },
       "layout": { "excluded": ["target"] },
       "languageImport": {

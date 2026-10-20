@@ -23,10 +23,19 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: |
+            8
+            17
+      # --expect-tag refuses LITHE_SDK_JAR and a lock without a released SDK.
       - name: Build the archive
-        run: node scripts/package.mjs --expect-tag "$GITHUB_REF_NAME" | tee "$RUNNER_TEMP/checksums.txt"
-      - name: Run the declared commands with Maven
+        run: |
+          set -o pipefail
+          node scripts/package.mjs --expect-tag "$GITHUB_REF_NAME" | tee "$RUNNER_TEMP/checksums.txt"
+      - name: Test the build provider's snapshot on Java 8
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+        run: node scripts/test-backend.mjs
+      - name: Run the provider and the declared commands with Maven
         run: node scripts/test.mjs
       - name: Publish release
         env:
