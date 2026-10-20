@@ -87,23 +87,15 @@ scripts/test-backend.mjs                       # 用假 Maven 计数，检查快
 
 本地需要 Node.js 22+、JDK（CI 用 17；扩展和后端都按 Java 8 编译，后端运行只需 Java 8）和 Maven（还需要 `zip`）。
 
-后端打进 Lithe 的 Java 插件 SDK。打包脚本按 `sdk.lock.json` 下载 SDK JAR 到 `.cache/sdk/`，SHA-256 不符就拒绝。
-SDK 的第一个版本（`sdk-java-v0.1.0`）发布前，锁文件还没有 SHA-256，需要从
-[1lck/Lithe-IDEA#1379](https://github.com/1lck/Lithe-IDEA/pull/1379) 的分支自行构建，再用 `LITHE_SDK_JAR` 指定：
+后端打进 Lithe 的 Java 插件 SDK。打包脚本按 `sdk.lock.json` 下载正式发布的 SDK JAR 到 `.cache/sdk/`，SHA-256 不符就拒绝。
 
-```bash
-mvn -B -f sdk/java/pom.xml verify
-```
-
-（在 Lithe-IDEA 仓库里运行，产出 `sdk/java/plugin-sdk/target/lithe-plugin-sdk-java-0.1.0.jar`。）
-锁文件有 SHA-256 后，`LITHE_SDK_JAR` 指向的 JAR 也必须与之相同；发布（`--expect-tag`）不接受 `LITHE_SDK_JAR`。
+如需本地调试，可用 `LITHE_SDK_JAR` 指向一个 JAR；正式锁定的 SHA-256 仍会校验该文件，发布（`--expect-tag`）不接受这个覆盖变量：
 
 ```bash
 LITHE_SDK_JAR=/path/to/lithe-plugin-sdk-java-0.1.0.jar node scripts/package.mjs
 ```
 
-SDK 发布后直接运行：
-
+开发或发布时直接运行：
 
 ```bash
 node scripts/package.mjs
