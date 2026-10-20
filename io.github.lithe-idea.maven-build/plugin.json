@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "io.github.lithe-idea.maven-build",
   "displayName": "Maven",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "pluginAPIVersion": 3,
   "requires": { "buildProviders": 1, "buildSystems": 1, "serverProcess": 1 },
   "vendor": {

@@ -19,7 +19,7 @@
   <groupId>io.github.lithe-idea</groupId>
   <artifactId>lithe-maven-backend</artifactId>
   <!-- Kept equal to plugin.json's version; scripts/package.mjs checks it. -->
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <packaging>jar</packaging>
   <name>Lithe Maven build provider</name>
 
