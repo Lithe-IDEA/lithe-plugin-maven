@@ -137,9 +137,9 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 在 Lithe 开发版中，通过 **设置 → 插件 → ⚙ → 从磁盘安装插件…** 选择 `dist/package/io.github.lithe-idea.maven-build`
 即可安装本地开发包（发行版 Lithe 不加载未签名的开发包）。
 
-`plugin.json` 的完整格式见 Lithe 的
-[插件契约](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/plugins/v1/README.md)
-和 Lithe Store 的[构建工具接入指南](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/build-tool-integration.md)。
+`plugin.json` 的完整格式见 lithe-plugin-docs 里的
+[插件契约](https://github.com/Lithe-IDEA/lithe-plugin-docs/blob/main/contract/v1/README.md)
+和[构建工具接入指南](https://github.com/Lithe-IDEA/lithe-plugin-docs/blob/main/guides/build-tool-integration.md)。
 
 ## 发布新版本
 
