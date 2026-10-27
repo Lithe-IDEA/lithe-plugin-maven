@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Runs test/fixtures/reactor with a real Maven: the model and dependency
-// trees through the packaged build provider (lib/lithe-maven-backend.jar,
-// which runs Maven with the extension), and the commands plugin.json
-// declares. It checks the documents Lithe receives; Lithe's own tests decode
+// trees and native tests through the packaged build provider
+// (lib/lithe-maven-backend.jar, which runs Maven with the extension). It checks the documents Lithe receives; Lithe's own tests decode
 // them, this script makes sure Maven produces them. The provider's caching is
 // covered by scripts/test-backend.mjs with a fake Maven.
 //
@@ -25,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
-const pluginDir = resolve("dist", "package", PACKAGE_DIR);
+const pluginDir = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve("dist", "package", PACKAGE_DIR));
 const maven = process.env.MVN ?? "mvn";
 if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar")) || !existsSync(join(pluginDir, "lib", "lithe-maven-backend.jar"))) {
   console.error("✗ dist/package is missing; run node scripts/package.mjs first");
@@ -34,44 +33,8 @@ if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar")) || !existsS
 const manifest = JSON.parse(readFileSync(join(pluginDir, "plugin.json"), "utf8"));
 const buildSystem = manifest.buildSystems[0];
 
-/**
- * Expands a declared argument list the way Lithe does for this test: no
- * option has a value, so `${optionArguments:…}` contributes nothing, and a
- * conditional argument is kept when its conditions hold.
- */
-function expand(list, { project, suite }) {
-  const conditions = {
-    projectSelected: project !== undefined,
-    noProjectSelected: project === undefined,
-    nestedProjectSelected: project !== undefined && project !== ".",
-    suiteSelected: suite !== undefined,
-    caseSelected: false,
-    noCaseSelected: true,
-  };
-  const result = [];
-  for (const item of list) {
-    const value = typeof item === "string" ? item : item.value;
-    const when = typeof item === "string" ? [] : [item.when].flat();
-    if (!when.every((condition) => conditions[condition])) continue;
-    if (/^\$\{optionArguments(:[A-Za-z]+)?\}$/.test(value)) continue;
-    result.push(
-      value
-        .replaceAll("${pluginDir}", pluginDir)
-        .replaceAll("${project.path}", project ?? "")
-        .replaceAll("${test.suite}", suite ?? ""),
-    );
-  }
-  return result;
-}
-
 const report = createReport("maven-integration");
 const timeoutMs = mavenTimeout();
-function run(name, root, list, signal, values = {}) {
-  const argv = [...expand(buildSystem.invocation.globalArguments, values), ...expand(list, values)];
-  return report.step(name, () => runCommand(maven, argv, {
-    cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
-  }));
-}
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
 const root = join(scratch, "reactor");
@@ -115,7 +78,7 @@ async function test(signal) {
       state: join(scratch, "state"),
       timeoutMs,
     });
-    await report.step("start the build provider", () => backend.initialize(root));
+    await report.step("start the build provider", () => backend.initialize(root, [3]));
     const params = (extra = {}) => ({
       buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
       tool: { executable: mavenExecutable() }, ...extra,
@@ -185,11 +148,11 @@ async function test(signal) {
       assert.equal(junit.children[0].name, "hamcrest-core");
     });
 
-    await check("one Maven run serves the model and every tree, and is saved for the next start", async () => {
+    await check("one Maven model run serves every tree and leaves a reusable snapshot", async () => {
       const saved = JSON.parse(readFileSync(join(scratch, "state", "maven-snapshot.json"), "utf8")).value;
       assert.equal(saved.snapshotVersion, 1);
       assert.deepEqual(saved.roots[root].model, model);
-      assert.equal(await backend.close(), 0);
+      // The provider remains alive for the native task/test requests below.
     });
 
     await check("reading the model and dependencies builds nothing", () => {
@@ -198,7 +161,11 @@ async function test(signal) {
       }
     });
 
-    await run("run the filtered Maven test suite", root, buildSystem.test.arguments, signal, { project: "core", suite: "demo.core.GreeterTest" });
+    await report.step("run the filtered Maven test suite through its provider", async () => {
+      const result = await backend.request("lithe/build/test", params({ project: { name: "core", path: "core" },
+        suite: "demo.core.GreeterTest", userArguments: [], operationID: "test-suite" }));
+      assert.equal(result.exitCode, 0, result.output);
+    });
     await check("a filtered test run writes the report the results glob reads", () => {
       const report = readFileSync(join(root, "core", "target", "surefire-reports", "TEST-demo.core.GreeterTest.xml"), "utf8");
       assert.match(report, /<testsuite[^>]*name="demo\.core\.GreeterTest"[^>]*tests="2"/);

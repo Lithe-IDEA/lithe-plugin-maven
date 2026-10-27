@@ -19,14 +19,14 @@ import java.util.Objects;
 final class Projects {
     private Projects() {}
 
-    static List<Object> dependenciesOf(MavenRuns.Loaded loaded, Path root, String path) {
-        Path wanted = root.resolve(path).toAbsolutePath().normalize();
+    static List<Object> dependenciesOf(MavenRuns.Loaded loaded, Path workspace, String path) {
+        Path wanted = workspace.resolve(path).toAbsolutePath().normalize();
         List<Object> projects = list(loaded.model().get("projects"));
         List<Object> nodes = list(loaded.dependencies().get("dependencies"));
         for (int index = 0; index < projects.size(); index++) {
             Map<String, Object> project = Json.object(projects.get(index));
             String projectPath = Json.string(project, "path");
-            if (projectPath == null || !samePath(wanted, root.resolve(projectPath))) {
+            if (projectPath == null || !samePath(wanted, workspace.resolve(projectPath))) {
                 continue;
             }
             Map<String, Object> properties = Json.object(project.get("properties"));

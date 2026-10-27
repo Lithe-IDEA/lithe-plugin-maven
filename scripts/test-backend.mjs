@@ -21,7 +21,7 @@ import { withInterrupts } from "./process.mjs";
 import { createReport } from "./report.mjs";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
-const jar = resolve("dist", "package", PACKAGE_DIR, "lib", "lithe-maven-backend.jar");
+const jar = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve("dist", "package", PACKAGE_DIR), "lib", "lithe-maven-backend.jar");
 if (!existsSync(jar)) {
   console.error("✗ dist/package is missing the backend; run node scripts/package.mjs first");
   process.exit(1);
@@ -153,12 +153,12 @@ async function test() {
     });
 
     await check("changed options and .mvn/maven.config invalidate the snapshot", async () => {
-      assert.equal((await client.request("lithe/build/model", params({ optionArguments: ["-o"] }))).fakeRun, 4);
+      assert.equal((await client.request("lithe/build/model", params({ options: { offline: true } }))).fakeRun, 4);
       assert.ok(runs().at(-1).argv.includes("-o"), "option arguments reach Maven");
       mkdirSync(join(root, ".mvn"));
       writeFileSync(join(root, ".mvn", "maven.config"), "-Pci\n");
-      assert.equal((await client.request("lithe/build/model", params({ optionArguments: ["-o"] }))).fakeRun, 5);
-      assert.equal((await client.request("lithe/build/model", params({ optionArguments: ["-o"] }))).fakeRun, 5);
+      assert.equal((await client.request("lithe/build/model", params({ options: { offline: true } }))).fakeRun, 5);
+      assert.equal((await client.request("lithe/build/model", params({ options: { offline: true } }))).fakeRun, 5);
     });
 
     await check("concurrent requests share one Maven run", async () => {

@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 1, "buildSystems": 1, "serverProcess": 1 },
+  "requires": { "buildProviders": 3, "buildModelInputs": 1, "buildSystems": 1, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -42,14 +42,7 @@
         ],
         "environmentInputs": ["MAVEN_HOME"],
         "runtimeDependencies": [{ "id": "java", "minimumVersion": "8" }],
-        "globalArguments": [
-          "-B",
-          "-ntp",
-          "${optionArguments:profiles}",
-          "${optionArguments:settingsFile}",
-          "${optionArguments:localRepository}",
-          "${optionArguments:offline}"
-        ],
+        "globalArguments": [],
         "version": { "arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)" },
         "minimumVersion": "3.6.3"
       },
@@ -99,6 +92,7 @@
         "mayUseNetwork": true
       },
       "model": { "source": "provider" },
+      "modelSharing": { "options": ["profiles", "offline", "skipTests"] },
       "tasks": [
         {
           "id": "clean",
@@ -106,11 +100,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "clean"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "validate",
@@ -118,11 +109,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "validate"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "compile",
@@ -130,11 +118,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "compile"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "test",
@@ -142,12 +127,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "test"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "package",
@@ -155,12 +136,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "package"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "verify",
@@ -168,12 +145,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "verify"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "install",
@@ -181,12 +154,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "install"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "site",
@@ -194,11 +163,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "site"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "deploy",
@@ -206,12 +172,8 @@
           "group": "lifecycle",
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "deploy"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "plugin-goal",
@@ -219,12 +181,8 @@
           "group": "build",
           "category": ["Plugins"],
           "fromModel": true,
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "${task.property:goal}"
-          ]
+          "source": "provider",
+          "arguments": []
         },
         {
           "id": "goal",
@@ -232,26 +190,15 @@
           "group": "other",
           "scopes": ["workspace", "project"],
           "requiresUserArguments": true,
-          "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
-            "${optionArguments:skipTests}",
-            "${userArguments}"
-          ]
+          "source": "provider",
+          "arguments": []
         }
       ],
       "test": {
         "scopes": ["workspace", "project"],
         "filters": ["suite", "case"],
-        "arguments": [
-          { "value": "-pl", "when": "nestedProjectSelected" },
-          { "value": "${project.path}", "when": "nestedProjectSelected" },
-          { "value": "-am", "when": ["nestedProjectSelected", "suiteSelected"] },
-          { "value": "-Dtest=${test.suite}", "when": ["suiteSelected", "noCaseSelected"] },
-          { "value": "-Dtest=${test.suite}#${test.case}", "when": ["suiteSelected", "caseSelected"] },
-          { "value": "-Dsurefire.failIfNoSpecifiedTests=false", "when": "suiteSelected" },
-          "test"
-        ],
+        "source": "provider",
+        "arguments": [],
         "results": {
           "decoder": "junitXml",
           "reports": ["target/surefire-reports/TEST-*.xml", "target/failsafe-reports/TEST-*.xml"]

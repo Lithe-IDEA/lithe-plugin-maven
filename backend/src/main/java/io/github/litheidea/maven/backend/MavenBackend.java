@@ -11,10 +11,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -61,7 +58,21 @@ public final class MavenBackend {
         });
         backend.onModel((params, context) -> copy(load(params, context).model()));
         backend.onDependencies(this::dependencies);
+        backend.onExecute((params, context) -> execution(params, context, false));
+        backend.onTest((params, context) -> execution(params, context, true));
         backend.listen();
+    }
+
+    private Object execution(Map<String, Object> params, CallContext context, boolean tests) throws Exception {
+        Path root = root(params);
+        Map<String, String> environment = environment(params.get("environment"));
+        Object tool = params.get("tool");
+        String executable = tool instanceof Map ? Json.string(Json.object(tool), "executable") : null;
+        Path maven = MavenExecutable.resolve(executable, root, environment);
+        // Model and execution use the same effective options and Maven runtime.
+        // The extension remains the owner of reactor and plugin-goal facts.
+        MavenRuns.Loaded loaded = load(params, context);
+        return MavenExecution.run(params, context, root, workspaceRoot, maven, environment, loaded, tests);
     }
 
     private Object dependencies(Map<String, Object> params, CallContext context) throws Exception {
@@ -76,7 +87,7 @@ public final class MavenBackend {
             throw new PluginError("maven.invalidProject", "The selected project has no path.");
         }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("dependencies", Projects.dependenciesOf(loaded, root, path));
+        result.put("dependencies", Projects.dependenciesOf(loaded, workspaceRoot, path));
         return result;
     }
 
@@ -92,16 +103,21 @@ public final class MavenBackend {
         Object tool = params.get("tool");
         String executable = tool instanceof Map ? Json.string(Json.object(tool), "executable") : null;
         Path maven = MavenExecutable.resolve(executable, root, environment);
-        Inputs inputs = new Inputs(root, maven, strings(params.get("optionArguments")),
+        Inputs inputs = new Inputs(root, maven, MavenExecution.optionArguments(params, false),
                 environment, hostEnvironment(params.get("environment")), extensionJar());
         boolean refresh = Boolean.TRUE.equals(params.get("refresh"));
         return runs.load(inputs, refresh, context.cancellation());
     }
 
-    private Path root(Map<String, Object> params) {
-        String root = Json.string(params, "root");
-        Path base = workspaceRoot == null ? Paths.get("").toAbsolutePath() : workspaceRoot;
-        return base.resolve(root == null || root.isEmpty() ? "." : root).toAbsolutePath().normalize();
+    private Path root(Map<String, Object> params) throws IOException {
+        if (workspaceRoot == null) throw new PluginError("maven.notInitialized", "The Maven backend was not initialized.");
+        String value = Json.string(params, "root");
+        if (value == null || value.isEmpty() || Paths.get(value).isAbsolute()) throw new PluginError("maven.invalidRoot", "Expected a workspace-relative Maven root.");
+        Path root = workspaceRoot.resolve(value).normalize().toRealPath();
+        if (!root.startsWith(workspaceRoot) || !Files.isRegularFile(root.resolve("pom.xml"))) {
+            throw new PluginError("maven.invalidRoot", "The Maven root must contain pom.xml inside the workspace.");
+        }
+        return root;
     }
 
     /**
@@ -130,19 +146,6 @@ public final class MavenBackend {
         return result;
     }
 
-    private static List<String> strings(Object value) {
-        if (!(value instanceof List)) {
-            return Collections.emptyList();
-        }
-        List<String> result = new ArrayList<>();
-        for (Object item : (List<?>) value) {
-            if (item instanceof String) {
-                result.add((String) item);
-            }
-        }
-        return result;
-    }
-
     /** The extension ships next to this JAR: {@code lib/lithe-maven-extension.jar}. */
     private static Path extensionJar() {
         try {
@@ -166,7 +169,7 @@ public final class MavenBackend {
             return Paths.get("").toAbsolutePath();
         }
         // `Paths.get(URI)` accepts the trailing slash a directory URI may carry.
-        return Paths.get(URI.create(rootUri)).toAbsolutePath().normalize();
+        return Paths.get(URI.create(rootUri)).toRealPath();
     }
 
     /** A shallow copy: the SDK stamps {@code format} on the returned document. */

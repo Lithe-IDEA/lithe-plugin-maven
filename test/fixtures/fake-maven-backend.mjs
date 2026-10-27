@@ -7,12 +7,14 @@
 //   { "exit": <status> }   print an [ERROR] line and exit with the status
 //   { "output": "missing" | "malformed" }  succeed without the documents, or with invalid JSON
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const control = existsSync(process.env.FAKE_MAVEN_CONTROL ?? "")
+const configuration = existsSync(process.env.FAKE_MAVEN_CONTROL ?? "")
   ? JSON.parse(readFileSync(process.env.FAKE_MAVEN_CONTROL, "utf8"))
   : {};
+const exporting = process.argv.some((argument) => argument.startsWith("-Dlithe.modelOutput="));
+const control = exporting ? configuration : (configuration.execution ?? configuration);
 const log = process.env.FAKE_MAVEN_LOG;
 const argv = process.argv.slice(2);
 appendFileSync(log, `${JSON.stringify({ pid: process.pid, self: process.env.FAKE_MAVEN_SELF, cwd: process.cwd(), argv })}\n`);
@@ -39,6 +41,20 @@ const value = (name) => argv.find((arg) => arg.startsWith(`-D${name}=`))?.slice(
 if (value("lithe.dependenciesProject") !== undefined) throw new Error("the backend must export every module");
 const modelOutput = value("lithe.modelOutput");
 const dependenciesOutput = value("lithe.dependenciesOutput");
+if (!exporting) {
+  console.log("[INFO] native Maven execution");
+  console.log("[WARNING] " + join(process.cwd(), "core/src/main/java/demo/core/Greeter.java") + ":[1,1] test diagnostic");
+  const selector = argv.find(argument => argument.startsWith("-Dtest="))?.slice(7);
+  if (selector && !control.noReport) {
+    const [selectedSuite, method = "greets"] = selector.split("#");
+    const suite = control.reportSuite ?? selectedSuite;
+    const directory = join(process.cwd(), "core/target/surefire-reports");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "TEST-" + suite + ".xml"), `<testsuite><testcase classname="${suite}" name="${method}"/></testsuite>`);
+  }
+  if (control.flood) await new Promise((done, reject) => process.stdout.write("x".repeat(9 * 1024 * 1024), error => error ? reject(error) : done()));
+  process.exit(0);
+}
 if (!modelOutput || !dependenciesOutput) throw new Error("expected both output properties");
 if (control.output === "missing") process.exit(0);
 if (control.output === "malformed") {
@@ -86,7 +102,8 @@ writeFileSync(modelOutput, JSON.stringify({
     ...(project.parentPath ? { parent: project.parentPath } : {}),
     properties: { groupId: project.groupId, artifactId: project.artifactId, version: project.version, packaging: project.packaging },
   })),
-  tasks: [],
+  tasks: [{ name: "compiler:compile", project: projects[1].path, path: projects[1].path,
+    template: "plugin-goal", group: "build", properties: { goal: "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile" } }],
   contentRoots: [],
 }));
 writeFileSync(dependenciesOutput, JSON.stringify({
