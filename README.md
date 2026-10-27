@@ -2,7 +2,7 @@
 
 为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
-这是一个**社区插件**，用 Lithe 的声明式构建系统接口（插件 API 3 的 `buildSystems`）实现，
+这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 3`）实现，
 除了下面说的 Maven 扩展 jar 和读取项目用的 Java 后端，没有任何宿主代码。
 
 > English: Maven support for Lithe through the declarative `buildSystems` plugin API — project tree, lifecycle and
@@ -56,10 +56,59 @@ brew install maven
   指纹不变时，重新打开项目或展开模块直接用快照，不启动 Maven。
 - 同时到达的请求共用一次 Maven 运行；全部请求都取消后才结束 Maven。运行期间 POM 被修改时，本次结果照常显示但不保存。
 - 指纹看不到的变化（例如根目录外的父 POM、远程仓库里更新的 SNAPSHOT）请点 Reload，它总是重新运行 Maven。
-- 不会编译或打包，也不会生成 `target/`；解析依赖时只读 POM，不下载依赖 jar。
+- 读取模型和依赖不会编译或打包，也不会生成 `target/`；只有用户显式执行任务或测试才运行构建。解析依赖时只读 POM，不下载依赖 jar。
 - 没有 Lithe 的属性时扩展什么都不做；插件目录在运行时保持只读。
 
 读取项目会执行 POM 中声明的 Maven 扩展和插件，首次读取还可能联网下载插件描述，所以 Lithe 会先确认你信任这个工作区。
+
+## 原生任务与测试（开发中）
+
+当前源码把生命周期、模型中的插件目标、自定义目标以及测试统一交给同一个工作区
+Maven 后端执行。清单里这些入口的命令模板已删除，宿主仅传任务 ID、工程选择、
+生效选项和原始参数数组。Maven 自己读取工程并执行；插件没有重写 POM、工程模型、
+依赖求解或 Surefire。普通任务的 Skip Tests 仍按任务语义生效；显式测试动作不会
+被这个工具栏开关跳过。
+
+嵌套工作区使用宿主提供的工作区相对路径，执行前按当前 Maven 扩展模型重新确认
+模块名称、目录及插件目标，插件目标不能借一个伪造 properties.goal 运行。输出通过
+Provider 进度传回，最终结果保留非零退出码；取消或宿主退出会结束本次 Maven 与子进程。
+总输出最多 8 MiB，超限会明确失败并停止工具。报告和编译输出仍写用户工程的 target；
+快照写宿主提供的工作区状态目录，插件安装目录保持只读。
+
+测试的类和方法选择映射到 Surefire 的公开接口，特殊模式明确拒绝，不把一个精确
+请求扩大成通配匹配。使用 -am 构建依赖模块时，它们可以没有所选测试；执行结束后
+还检查当前模块/反应堆是否产生所选测试的新报告，避免“不存在的方法 + 成功空结果”
+或旧报告被当成测试通过。完整结果仍由宿主既有 JUnit XML 解析器展示。
+
+插件通过 buildModelInputs 1 显式公开规范化项目、目标、内容目录及 profiles/offline/
+skipTests 的生效值；共享内容不包含任务、运行计划、settings.xml 内容或私有函数。
+这为后续 Java 协作提供数据入口，不表示 Java/JDT、旧 MavenService、Agent 或设置
+已经完成迁移。
+
+**发布前依赖尚未完成：** 该源码需要包含原生执行处理器的新版 Java SDK，正式
+sdk.lock.json 仍锁定已有发布物，没有伪造新版本/校验值或放松 SHA-256 检查。
+必须先发布配套 SDK 并更新锁定值，之后才可走正式 package.mjs 和 Release 流程。
+当前只使用显式的本地开发构建验证，不应把它作为可发布包。
+
+```bash
+node scripts/package-development.mjs --sdk-jar /absolute/path/to/development-sdk.jar
+# 上一步打印独立目录，或读取 .artifacts/native-development/latest.json 的 package。
+export LITHE_TEST_PACKAGE=/absolute/path/printed/above/io.github.lithe-idea.maven-build
+node scripts/test-backend.mjs
+node scripts/test-native.mjs
+node scripts/test.mjs
+# 可选：在包含 buildModelInputs 的当前宿主 Core 上完整验证计划、报告及模型共享。
+LITHE_CORE_LIBRARY=/absolute/path/to/liblithe_core.dylib node scripts/test-native-core.mjs
+```
+
+开发构建在 .artifacts/native-development/run-* 的独立源码副本中编译，记录显式 SDK
+的 SHA-256 和完整包文件清单；不生成发行 ZIP、不写 dist/，不改 sdk.lock.json。
+这些工作区产物不能跨工作树共享，不是产品运行缓存。测试保留每项 JSON/HTML/JUnit
+耗时并清理所有本次进程。真实 Core 验证还需要 Python 3 的标准 ctypes 模块，不会安装
+Python 包。Windows 产品尚未接入本契约，本地 Java 21 验证也不能代替 Java 8 实机验收。
+
+公开接口依据：[Maven CLI](https://maven.apache.org/ref/3-LATEST/maven-embedder/cli.html)、
+[Surefire 的测试选择](https://maven.apache.org/surefire/maven-surefire-plugin/test-mojo)。
 
 ## 安装
 

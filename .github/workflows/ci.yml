@@ -40,6 +40,15 @@ jobs:
         env:
           LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
         run: node scripts/test-backend.mjs
+      - name: Test native Provider execution and cleanup (Java 17)
+        env:
+          LITHE_REPORT_DIR: .artifacts/test-stability/native-java17
+        run: node scripts/test-native.mjs
+      - name: Test native Provider execution and cleanup (Java 8)
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+          LITHE_REPORT_DIR: .artifacts/test-stability/native-java8
+        run: node scripts/test-native.mjs
       - name: Download Maven ${{ matrix.maven }}
         if: matrix.maven != 'runner'
         env:

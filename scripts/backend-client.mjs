@@ -2,7 +2,7 @@
 // frames over the process's stdio, `initialize` offering litheBuild 1, then
 // lithe/build/* requests. Every wait is bounded, and the backend runs in its
 // own process group so a test can always end whatever it left behind.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export const WAIT_MS = 20_000;
@@ -12,6 +12,8 @@ export class BackendClient {
   #pending = new Map();
   #nextId = 1;
   stderr = "";
+  notifications = [];
+  onNotification;
 
   /** Starts `java -jar <jar> --state <state>`; `javaOptions` go before `-jar`. */
   constructor({ java = "java", jar, state, env = process.env, javaOptions = [], timeoutMs = WAIT_MS }) {
@@ -66,11 +68,11 @@ export class BackendClient {
     this.notify("$/cancelRequest", { id });
   }
 
-  async initialize(root) {
+  async initialize(root, versions = [1]) {
     const result = await this.request("initialize", {
       processId: process.pid,
       rootUri: pathToFileURL(root).href,
-      capabilities: { experimental: { litheBuild: { versions: [1] } } },
+      capabilities: { experimental: { litheBuild: { versions } } },
     });
     this.notify("initialized", {});
     return result;
@@ -88,10 +90,27 @@ export class BackendClient {
 
   /** Ends the backend's whole process group, for teardown after a failure. */
   kill() {
-    if (!this.child.pid) return;
-    // macOS answers EPERM for a group whose members already exited but are not reaped yet.
-    try { process.kill(-this.child.pid, "SIGKILL"); }
-    catch (error) { if (error.code !== "ESRCH" && error.code !== "EPERM") throw error; }
+    if (!this.child.pid || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    // SDK tools form their own POSIX groups. Capture the live descendant tree
+    // before ending Java so an assertion failure also reaches those groups.
+    const snapshot = spawnSync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8", timeout: 2000 });
+    if (snapshot.error || snapshot.status !== 0) {
+      // Always try to stop the owner, then report incomplete cleanup evidence.
+      try { process.kill(-this.child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+      throw new Error("Cannot inspect the backend process tree: " + (snapshot.error?.message ?? snapshot.stderr));
+    }
+    const pairs = snapshot.stdout.trim().split("\n").map(line => line.trim().split(/\s+/).map(Number));
+    const owned = new Set([this.child.pid]);
+    for (let count = 0; count < pairs.length; count++) {
+      const before = owned.size;
+      for (const [pid, parent] of pairs) if (owned.has(parent)) owned.add(pid);
+      if (before === owned.size) break;
+    }
+    const signal = (pid) => {
+      try { process.kill(pid, "SIGKILL"); }
+      catch (error) { if (error.code !== "ESRCH" && error.code !== "EPERM") throw error; }
+    };
+    for (const pid of [...owned].reverse()) { signal(-pid); signal(pid); }
   }
 
   #write(message) {
@@ -118,6 +137,10 @@ export class BackendClient {
       try { message = JSON.parse(this.#buffer.subarray(headerEnd + 4, headerEnd + 4 + length).toString("utf8")); }
       catch { return this.#broken("a frame that is not JSON"); }
       this.#buffer = this.#buffer.subarray(headerEnd + 4 + length);
+      if (message.method !== undefined && message.id === undefined) {
+        this.notifications.push(message);
+        this.onNotification?.(message);
+      }
       if (message.id !== undefined && message.method === undefined) {
         this.#pending.get(message.id)?.(message);
         this.#pending.delete(message.id);
