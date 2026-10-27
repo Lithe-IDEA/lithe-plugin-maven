@@ -192,6 +192,13 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 
 ## 发布新版本
 
+合并前验证新版 SDK 源码时，可以手动运行 CI 的 `workflow_dispatch`，传入
+`sdk-revision`（`lithe-plugin-docs` 的完整提交 SHA）。该模式只构建隔离的开发包，
+在 Java 8 上执行快照、原生任务/取消/清理与真实 Maven 反应堆测试，覆盖当前 Maven
+和最低支持的 3.6.3。报告包含 SDK JAR 哈希和包文件清单；不会修改 `sdk.lock.json`、
+生成 `dist/` 或发布工件。普通 PR、主分支和 Release 继续使用正式 SDK 的地址与哈希
+校验，开发验证通过不能代替正式打包。
+
 1. 同时修改 `plugin.json`、`extension/pom.xml` 和 `backend/pom.xml` 的版本（例如 `0.2.0`；打包脚本会检查三者一致），
    确认 `sdk.lock.json` 已填入正式发布的 SDK 地址和 SHA-256，合入 `main`。
 2. 推送同名标签：
