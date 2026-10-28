@@ -119,7 +119,7 @@ async function test() {
       assert.equal(runs().length, 1, "dependencies come from the same run");
 
       const snapshot = JSON.parse(readFileSync(snapshotFile, "utf8")).value;
-      assert.equal(snapshot.snapshotVersion, 1);
+      assert.equal(snapshot.snapshotVersion, 2);
       assert.deepEqual(Object.keys(snapshot.roots), [root]);
     });
 
@@ -159,6 +159,21 @@ async function test() {
       writeFileSync(join(root, ".mvn", "maven.config"), "-Pci\n");
       assert.equal((await client.request("lithe/build/model", params({ options: { offline: true } }))).fakeRun, 5);
       assert.equal((await client.request("lithe/build/model", params({ options: { offline: true } }))).fakeRun, 5);
+    });
+
+    await check("a native settings source selected by Maven invalidates cache even outside CLI guessing", async () => {
+      const selected = join(root, ".mvn", "selected settings.xml");
+      const before = runs().length;
+      writeFileSync(selected, "<settings><!-- external edit --></settings>");
+      await client.request("lithe/build/model", params({ options: { offline: true } }));
+      assert.equal(runs().length, before + 1);
+      await client.request("lithe/build/model", params({ options: { offline: true } }));
+      assert.equal(runs().length, before + 1, "unchanged selected source still permits cache reuse");
+      rmSync(selected);
+      await client.request("lithe/build/model", params({ options: { offline: true } }));
+      assert.equal(runs().length, before + 2, "removing an explicitly selected native source invalidates its snapshot");
+      const entry = JSON.parse(readFileSync(snapshotFile, "utf8")).value.roots[root];
+      assert.equal(entry.nativeSources[0].revision, "missing");
     });
 
     await check("concurrent requests share one Maven run", async () => {
@@ -276,12 +291,12 @@ async function test() {
       assert.equal(runs().length, before + 1);
 
       const stored = JSON.parse(readFileSync(snapshotFile, "utf8"));
-      stored.value.snapshotVersion = 2;
+      stored.value.snapshotVersion = 99;
       writeFileSync(snapshotFile, JSON.stringify(stored));
       before = runs().length;
       await client.request("lithe/build/model", params());
       assert.equal(runs().length, before + 1);
-      assert.equal(JSON.parse(readFileSync(snapshotFile, "utf8")).value.snapshotVersion, 1, "the next run rewrites it");
+      assert.equal(JSON.parse(readFileSync(snapshotFile, "utf8")).value.snapshotVersion, 2, "the next run rewrites it");
     });
 
     await check("without tool.executable the backend uses the project's Maven Wrapper", async () => {

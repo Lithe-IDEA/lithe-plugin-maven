@@ -10,6 +10,10 @@ on:
         description: 'Exact lithe-plugin-docs commit for development-only Java 8 validation'
         required: true
         type: string
+      core-revision:
+        description: 'Optional exact Lithe commit for current native configuration and Core workflows'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -153,6 +157,30 @@ jobs:
         env:
           LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
         run: node scripts/test.mjs
+      - name: Require a fixed Core revision when selected
+        if: inputs.core-revision != ''
+        env:
+          CORE_REVISION: ${{ inputs.core-revision }}
+        run: '[[ "$CORE_REVISION" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        if: inputs.core-revision != ''
+        with:
+          repository: 1lck/Lithe-IDEA
+          ref: ${{ inputs.core-revision }}
+          path: .artifacts/core-source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.core-revision != ''
+      - name: Build the selected host Core and verify real native settings
+        if: inputs.core-revision != ''
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+        run: |
+          cargo build --locked --manifest-path .artifacts/core-source/rust/Cargo.toml -p lithe-core --lib
+          export LITHE_CORE_LIBRARY="$GITHUB_WORKSPACE/.artifacts/core-source/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="${MVN:-$(command -v mvn)}"
+          node scripts/test-configuration.mjs
+          node scripts/test-native-core.mjs
       - name: Prove the release inputs stayed unchanged
         run: |
           git diff --exit-code -- sdk.lock.json backend/pom.xml extension/pom.xml io.github.lithe-idea.maven-build

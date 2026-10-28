@@ -89,6 +89,7 @@ await withInterrupts(async (signal) => {
       consumer.id = 'org.example.maven-input-consumer';
       consumer.requires.buildProviders = 6;
       delete consumer.buildSystems[0].modelSharing;
+      delete consumer.buildSystems[0].configuration;
       consumer.buildSystems[0].modelInputs = [{ pluginID: id, buildSystemID: 'maven' }];
       const snapshot = coreCommand('build.resolveModelInputs', { manifest: consumer, buildSystemID: 'maven', request: { revision: 11,
         sources: [{ manifest, instances: [{ buildSystemID: 'maven', root, state: 'ready', model, options }] }] } }).modelInputs;

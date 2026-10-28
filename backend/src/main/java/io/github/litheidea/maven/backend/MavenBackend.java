@@ -33,6 +33,7 @@ public final class MavenBackend {
     private volatile Path workspaceRoot;
     private volatile Snapshots snapshots;
     private volatile MavenRuns runs;
+    private volatile Path workspaceState;
 
     private MavenBackend(String stateDirectory) {
         this.stateDirectory = stateDirectory;
@@ -54,8 +55,10 @@ public final class MavenBackend {
             } else {
                 backend.log("No --state directory: Maven results are not kept across restarts.");
             }
+            workspaceState = state;
             runs = new MavenRuns(snapshots, backend, state);
         });
+        backend.onConfiguration((params, context) -> ConfigurationProbe.read(inputs(params), workspaceState, context.cancellation()));
         backend.onModel((params, context) -> copy(load(params, context).model()));
         backend.onDependencies(this::dependencies);
         backend.onExecute((params, context) -> execution(params, context, false));
@@ -95,18 +98,20 @@ public final class MavenBackend {
         if (runs == null) {
             throw new PluginError("maven.notInitialized", "The Maven backend was not initialized.");
         }
+        Inputs inputs = inputs(params);
+        boolean refresh = Boolean.TRUE.equals(params.get("refresh"));
+        return runs.load(inputs, refresh, context.cancellation());
+    }
+
+    private Inputs inputs(Map<String, Object> params) throws IOException {
         Path root = root(params);
-        if (!Files.isDirectory(root)) {
-            throw new PluginError("maven.missingRoot", root + " is not a directory.");
-        }
+        if (!Files.isDirectory(root)) throw new PluginError("maven.missingRoot", "The Maven root is unavailable.");
         Map<String, String> environment = environment(params.get("environment"));
         Object tool = params.get("tool");
         String executable = tool instanceof Map ? Json.string(Json.object(tool), "executable") : null;
         Path maven = MavenExecutable.resolve(executable, root, environment);
-        Inputs inputs = new Inputs(root, maven, MavenExecution.optionArguments(params, false),
+        return new Inputs(root, maven, MavenExecution.optionArguments(params, false),
                 environment, hostEnvironment(params.get("environment")), extensionJar());
-        boolean refresh = Boolean.TRUE.equals(params.get("refresh"));
-        return runs.load(inputs, refresh, context.cancellation());
     }
 
     private Path root(Map<String, Object> params) throws IOException {

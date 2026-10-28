@@ -36,15 +36,35 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     private final MavenPluginManager pluginManager;
     private final PluginVersionResolver versionResolver;
     private final ProjectDependenciesResolver dependenciesResolver;
+    private final NativeSettingsEvents settingsEvents;
 
     @Inject
     public LitheLifecycleParticipant(
             MavenPluginManager pluginManager,
             PluginVersionResolver versionResolver,
-            ProjectDependenciesResolver dependenciesResolver) {
+            ProjectDependenciesResolver dependenciesResolver,
+            NativeSettingsEvents settingsEvents) {
         this.pluginManager = pluginManager;
         this.versionResolver = versionResolver;
         this.dependenciesResolver = dependenciesResolver;
+        this.settingsEvents = settingsEvents;
+    }
+
+    /** Settings-only probe exits before reactor reading or lifecycle goals. */
+    @Override
+    public void afterSessionStart(MavenSession session) throws MavenExecutionException {
+        String output = property(session, "lithe.configurationOutput");
+        String context = property(session, "lithe.configurationContextOutput");
+        if (output == null && context == null) return;
+        try {
+            String document = Json.write(output == null
+                    ? SettingsExport.context(session, settingsEvents.capture())
+                    : SettingsExport.document(session, settingsEvents.capture()));
+            write(output == null ? context : output, document);
+        } catch (Exception error) {
+            throw new MavenExecutionException("Lithe could not inspect Maven configuration.", error);
+        }
+        if (output != null) throw new MavenExecutionException("Lithe configuration inspection completed.", (Throwable) null);
     }
 
     @Override

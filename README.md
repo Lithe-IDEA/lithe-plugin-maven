@@ -2,7 +2,7 @@
 
 为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
-这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 3`）实现，
+这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 7`）实现，
 除了下面说的 Maven 扩展 jar 和读取项目用的 Java 后端，没有任何宿主代码。
 
 > English: Maven support for Lithe through the declarative `buildSystems` plugin API — project tree, lifecycle and
@@ -213,3 +213,35 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 ## 许可
 
 [Apache-2.0](LICENSE)。图标来自 IntelliJ Platform，见 [NOTICE](NOTICE)。
+
+## 原生配置（协议 7，开发中）
+
+通用的构建系统设置页通过 `lithe/build/configuration` 读取 Maven 实际选中的安装级和用户级
+settings.xml，显示非敏感的 localRepository、activeProfiles 原值及实际生效值。打开页面只读；
+只有显式开启覆盖并保存，宿主才修改所列来源。安装来源以及与安装文件相同的用户来源始终只读。
+保存使用源字节哈希防止覆盖外部编辑，保留其他内容、注释、权限和凭据，再由 Maven 重新读取
+生效值。命令行覆盖值单独显示，不能将保存的原值直接当成生效值。
+
+扩展观察 Maven 官方的 SettingsBuildingRequest/Result 事件，不重新实现配置优先级；
+会话执行请求提供最终 CLI 值。配置读取在 reactor 导入前结束，因此损坏 POM 不会阻止查看
+原生配置。整个 XML 不跨 Provider RPC，服务器/代理密码等字段既不导出也不记录。工具探针
+只在已分配的工作区状态创建临时目录，调用结束清理；app 和插件安装资源不变。
+
+模型缓存版本 2 只存实际上游选中的 settings/toolchains 的 URI 与字节哈希。它在读取和发布
+结果时校验来源，在下一次请求复用缓存前再次核对；修改、删除或换向选中来源即使没有 POM
+事件也会使缓存失效。旧缓存只是可重建结果，版本不匹配即重新读取。来源哈希不是可跨工作树
+复用的构建身份，不复制缓存或探针目录。用户原生文件只由宿主明确保存流程写入。
+
+显式运行隔离测试（不会使用或修改开发者真实 settings）：
+
+```bash
+LITHE_TEST_JAVA=/absolute/java LITHE_TEST_MAVEN=/absolute/mvn \
+LITHE_CORE_LIBRARY=/absolute/liblithe_core.dylib node scripts/test-configuration.mjs
+```
+
+此能力依赖尚待正式发布、锁定的配套 SDK 和宿主。源码的开发包、Core 和原生 macOS
+测试通过不等于完成整个 #1495 阶段 D；旧配置数据、其余 Run/Test/Debug 和 Windows
+消费者仍需完成各自迁移并删除旧路径。
+
+`workflow_dispatch` 的开发 SDK lane 可额外指定 40 位 `core-revision`，构建该宿主 Core 后运行
+原生配置及真实构建/精确测试的集成；SDK、Core 都按明确提交选取，不修改正式锁定文件。

@@ -150,7 +150,7 @@ async function test(signal) {
 
     await check("one Maven model run serves every tree and leaves a reusable snapshot", async () => {
       const saved = JSON.parse(readFileSync(join(scratch, "state", "maven-snapshot.json"), "utf8")).value;
-      assert.equal(saved.snapshotVersion, 1);
+      assert.equal(saved.snapshotVersion, 2);
       assert.deepEqual(saved.roots[root].model, model);
       // The provider remains alive for the native task/test requests below.
     });

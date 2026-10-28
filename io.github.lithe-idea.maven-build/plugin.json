@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 3, "buildModelInputs": 1, "buildSystems": 1, "serverProcess": 1 },
+  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 1, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -92,6 +92,7 @@
         "mayUseNetwork": true
       },
       "model": { "source": "provider" },
+      "configuration": { "source": "provider" },
       "modelSharing": { "options": ["profiles", "offline", "skipTests"] },
       "tasks": [
         {

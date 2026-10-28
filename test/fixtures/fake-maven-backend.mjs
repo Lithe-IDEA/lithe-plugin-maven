@@ -7,6 +7,8 @@
 //   { "exit": <status> }   print an [ERROR] line and exit with the status
 //   { "output": "missing" | "malformed" }  succeed without the documents, or with invalid JSON
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,6 +58,13 @@ if (!exporting) {
   process.exit(0);
 }
 if (!modelOutput || !dependenciesOutput) throw new Error("expected both output properties");
+const configurationOutput = value("lithe.configurationContextOutput");
+if (!configurationOutput) throw new Error("expected the native configuration context");
+const nativeSource = process.env.FAKE_MAVEN_NATIVE_SOURCE ?? join(process.cwd(), ".mvn", "selected settings.xml");
+writeFileSync(configurationOutput, JSON.stringify({ format: "litheMavenNativeInputs", version: 1,
+  sources: [{ uri: pathToFileURL(nativeSource).href,
+    revision: existsSync(nativeSource) ? "sha256:" + createHash("sha256").update(readFileSync(nativeSource)).digest("hex") : "missing" }] }));
+
 if (control.output === "missing") process.exit(0);
 if (control.output === "malformed") {
   writeFileSync(modelOutput, "{invalid JSON");
