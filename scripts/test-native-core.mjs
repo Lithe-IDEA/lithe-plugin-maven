@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The production plugin, current Core C ABI, and a real Maven reactor in one workflow.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -45,7 +45,7 @@ await withInterrupts(async (signal) => {
       state: join(scratch, 'state'), timeoutMs: mavenTimeout() });
     await report.step('Core admits the new Maven capability and produces only Provider plans', async () => {
       coreCommand('plugins.declarative.validate', { manifest });
-      assert.equal((await client.initialize(workspace, [3])).capabilities.experimental.litheBuild.version, 3);
+      assert.equal((await client.initialize(workspace, [8])).capabilities.experimental.litheBuild.version, 8);
       for (const task of manifest.buildSystems[0].tasks) { assert.equal(task.source, 'provider'); assert.deepEqual(task.arguments, []); }
       assert.equal(manifest.buildSystems[0].test.source, 'provider');
     });
@@ -73,7 +73,7 @@ await withInterrupts(async (signal) => {
       const result = await send(testPlan, 'exact-test');
       assert.equal(result.exitCode, 0, result.output);
       const tests = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, projects: model.projects.map(project => project.path),
-        suite: 'demo.core.GreeterTest', output: result.output }).results;
+        suite: 'demo.core.GreeterTest', output: result.output, result: result.testResults }).results;
       assert.equal(tests.summary.total, 1, JSON.stringify(tests));
       assert.equal(tests.summary.failed, 0, JSON.stringify(tests));
       assert.equal(tests.tests[0].case, 'greetsByName');
@@ -84,12 +84,37 @@ await withInterrupts(async (signal) => {
       const plan = build('build.testPlan', planned({ project, suite: 'demo.core.GreeterTest', case: 'doesNotExist', userArguments: [] })).plan;
       await assert.rejects(send(plan, 'unknown-test'), /no fresh result/);
     });
+    await report.step('custom Surefire directories and a failing method return only fresh inline reports', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      writeFileSync(pom, original.replace('</project>', `<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId><configuration><reportsDirectory>\${project.build.directory}/custom reports</reportsDirectory></configuration>
+        </plugin></plugins></build></project>`));
+      const failure = join(directory, 'src/test/java/demo/core/FailureTest.java');
+      writeFileSync(failure, 'package demo.core; public class FailureTest { @org.junit.Test public void failsForReport() { org.junit.Assert.fail("expected report failure"); } }');
+      const plan = build('build.testPlan', planned({ project, suite: 'demo.core.FailureTest', case: 'failsForReport', userArguments: [] })).plan;
+      const result = await send(plan, 'failing-custom-report');
+      assert.notEqual(result.exitCode, 0, result.output);
+      assert.ok(existsSync(join(directory, 'target/custom reports/TEST-demo.core.FailureTest.xml')));
+      const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+        projects: model.projects.map(value => value.path), result: result.testResults }).results;
+      assert.equal(decoded.summary.total, 1, JSON.stringify(decoded));
+      assert.equal(decoded.summary.failed, 1, JSON.stringify(decoded));
+      assert.equal(decoded.tests[0].project, 'nested/core');
+      assert.equal(decoded.tests[0].case, 'failsForReport');
+      assert.match(decoded.tests[0].message, /expected report failure/);
+      assert.deepEqual((await (await import('node:fs/promises')).readdir(join(scratch, 'state'))).filter(name => name.startsWith('execution-')), []);
+      rmSync(failure);
+      writeFileSync(pom, original);
+    });
     await report.step('publish the same normalized Maven facts and effective options to a declared consumer', () => {
       const consumer = JSON.parse(JSON.stringify(manifest));
       consumer.id = 'org.example.maven-input-consumer';
       consumer.requires.buildProviders = 6;
       delete consumer.buildSystems[0].modelSharing;
       delete consumer.buildSystems[0].configuration;
+      delete consumer.buildSystems[0].test.results;
       consumer.buildSystems[0].modelInputs = [{ pluginID: id, buildSystemID: 'maven' }];
       const snapshot = coreCommand('build.resolveModelInputs', { manifest: consumer, buildSystemID: 'maven', request: { revision: 11,
         sources: [{ manifest, instances: [{ buildSystemID: 'maven', root, state: 'ready', model, options }] }] } }).modelInputs;

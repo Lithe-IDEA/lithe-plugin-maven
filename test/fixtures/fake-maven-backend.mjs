@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, relative } from "node:path";
 
 const configuration = existsSync(process.env.FAKE_MAVEN_CONTROL ?? "")
   ? JSON.parse(readFileSync(process.env.FAKE_MAVEN_CONTROL, "utf8"))
@@ -52,7 +52,17 @@ if (!exporting) {
     const suite = control.reportSuite ?? selectedSuite;
     const directory = join(process.cwd(), "core/target/surefire-reports");
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "TEST-" + suite + ".xml"), `<testsuite><testcase classname="${suite}" name="${method}"/></testsuite>`);
+    const xml = control.badReport === 'broken' ? '<broken' : control.badReport === 'external-entity'
+      ? '<!DOCTYPE testsuite [<!ENTITY external SYSTEM "file:///fixture/must-not-open">]><testsuite name="x"><testcase classname="x" name="y">&external;</testcase></testsuite>'
+      : `<testsuite name="${suite}"><testcase classname="${suite}" name="${method}"/></testsuite>`;
+    writeFileSync(join(directory, "TEST-" + suite + ".xml"), xml);
+    if (value("lithe.reportOutput")) {
+      const file = join(dirname(value("lithe.reportOutput")), 'report-0.xml');
+      writeFileSync(file, xml);
+      writeFileSync(value("lithe.reportOutput"), JSON.stringify({ format: 'litheMavenOperationReports', version: 1,
+        reports: [{ file: 'report-0.xml', project: relative(value("lithe.reportWorkspace"), join(process.cwd(), 'core')),
+          sha256: createHash('sha256').update(xml).digest('hex') }] }));
+    }
   }
   if (control.flood) await new Promise((done, reject) => process.stdout.write("x".repeat(9 * 1024 * 1024), error => error ? reject(error) : done()));
   process.exit(0);

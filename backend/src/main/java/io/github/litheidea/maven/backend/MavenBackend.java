@@ -75,7 +75,7 @@ public final class MavenBackend {
         // Model and execution use the same effective options and Maven runtime.
         // The extension remains the owner of reactor and plugin-goal facts.
         MavenRuns.Loaded loaded = load(params, context);
-        return MavenExecution.run(params, context, root, workspaceRoot, maven, environment, loaded, tests);
+        return MavenExecution.run(params, context, root, workspaceRoot, maven, environment, loaded, tests, extensionJar(), workspaceState);
     }
 
     private Object dependencies(Map<String, Object> params, CallContext context) throws Exception {

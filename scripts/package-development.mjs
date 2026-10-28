@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runCommand, withInterrupts, mavenTimeout } from './process.mjs';
+import { verifyExtension } from './verify-extension.mjs';
 import { createReport } from './report.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
 
@@ -26,6 +27,7 @@ await withInterrupts(async (signal) => {
       ['extension', []], ['backend', [`-Dlithe.sdk.jar=${sdk}`]],
     ]) await report.step(`build ${name} with the explicit development SDK`, () => runCommand(process.env.MVN ?? 'mvn',
       ['-B', '-ntp', '-q', '-f', join(scratch, name, 'pom.xml'), ...args, 'package'], { signal, timeoutMs: mavenTimeout() }));
+    await report.step('check clean extension component registration', () => verifyExtension(join(scratch, 'extension/target/lithe-maven-extension.jar')));
     const pkg = join(run, id);
     await report.step('assemble a development-only package', () => {
       cpSync(resolve(id), pkg, { recursive: true });

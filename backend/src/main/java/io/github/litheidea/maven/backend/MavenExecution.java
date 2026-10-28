@@ -27,7 +27,7 @@ final class MavenExecution {
     private MavenExecution() {}
 
     static Map<String, Object> run(Map<String, Object> params, CallContext context, Path root, Path workspace,
-            Path maven, Map<String, String> environment, MavenRuns.Loaded loaded, boolean tests) throws IOException {
+            Path maven, Map<String, String> environment, MavenRuns.Loaded loaded, boolean tests, Path extension, Path state) throws Exception {
         String task = tests ? "test" : Json.string(params, "task");
         if (!tests && !LIFECYCLE.contains(task) && !"plugin-goal".equals(task) && !"goal".equals(task)) {
             throw invalid("Unknown Maven task.");
@@ -43,22 +43,12 @@ final class MavenExecution {
             command.add("-pl");
             command.add(root.relativize(project).toString());
         }
-        MavenTestSelection selection = null;
+        String suite = null, method = null;
         if (tests) {
-            String suite = filter(params.get("suite"), false);
-            String method = filter(params.get("case"), true);
+            suite = filter(params.get("suite"), false);
+            method = filter(params.get("case"), true);
             if (method != null && suite == null) throw invalid("A Maven test method needs its suite.");
             if (suite != null) {
-                List<Path> owners = new ArrayList<>();
-                if (project != null) owners.add(project);
-                else for (Object candidate : list(loaded.model().get("projects"))) {
-                    String path = Json.string(Json.object(candidate), "path");
-                    if (path == null) continue;
-                    Path owner = root.resolve(path).normalize().toRealPath();
-                    if (!owner.startsWith(root)) throw invalid("Maven report owner leaves the current reactor.");
-                    if (!owners.contains(owner)) owners.add(owner);
-                }
-                selection = new MavenTestSelection(owners, suite, method);
                 if (project != null && !project.equals(root)) command.add("-am");
                 command.add("-Dtest=" + suite + (method == null ? "" : "#" + method));
                 command.add("-Dsurefire.failIfNoSpecifiedTests=false");
@@ -73,6 +63,8 @@ final class MavenExecution {
         List<String> arguments = strings(params.get("userArguments"));
         if ("goal".equals(task) && arguments.isEmpty()) throw invalid("A custom Maven goal needs arguments.");
         command.addAll(arguments);
+        try (MavenTestReports reports = new MavenTestReports(state, workspace)) {
+        reports.instrument(command, extension);
         context.throwIfCancelled();
         Output output = new Output(context);
         Processes.Result result;
@@ -84,11 +76,13 @@ final class MavenExecution {
             throw error;
         }
         context.throwIfCancelled();
-        if (selection != null && result.exitCode() == 0) selection.verify(context);
+        Map<String, Object> testResults = reports.read(context, suite, method, tests && result.exitCode() == 0);
         Map<String, Object> reply = new LinkedHashMap<>();
         reply.put("exitCode", result.exitCode());
         reply.put("output", output.text());
+        reply.put("testResults", testResults);
         return reply;
+        }
     }
 
     /** One configuration drives model import, task execution and test execution. */

@@ -18,6 +18,7 @@
 // Usage: node scripts/package.mjs [--expect-tag <tag>]
 
 import { mavenTimeout, runCommand, withInterrupts, ZIP_TIMEOUT_MS } from "./process.mjs";
+import { verifyExtension } from './verify-extension.mjs';
 import { createReport } from "./report.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -117,6 +118,7 @@ await withInterrupts(async (signal) => {
     await report.step("build the Maven extension", async () => {
       await runCommand(process.env.MVN ?? "mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { timeoutMs, signal });
       if (!existsSync(EXTENSION_JAR)) throw new Error(`${EXTENSION_JAR} was not built`);
+      verifyExtension(EXTENSION_JAR);
     });
 
     const sdk = await report.step("check the plugin SDK", () => sdkJar(signal));

@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
+  "requires": { "buildProviders": 8, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -185,8 +185,7 @@
         "source": "provider",
         "arguments": [],
         "results": {
-          "decoder": "junitXml",
-          "reports": ["target/surefire-reports/TEST-*.xml", "target/failsafe-reports/TEST-*.xml"]
+          "decoder": "provider"
         }
       },
       "diagnostics": {

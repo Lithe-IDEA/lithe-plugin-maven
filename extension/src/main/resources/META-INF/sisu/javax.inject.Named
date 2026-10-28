@@ -1,1 +1,3 @@
 io.github.litheidea.maven.LitheLifecycleParticipant
+io.github.litheidea.maven.NativeSettingsEvents
+io.github.litheidea.maven.ReportCaptureEvents

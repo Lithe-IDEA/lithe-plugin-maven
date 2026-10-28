@@ -23,7 +23,10 @@ const executable = join(scratch, 'mvn');
 const clients = new Set();
 const report = createReport('native-maven');
 const runs = () => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-const executionRuns = () => runs().filter(run => !run.argv.includes('pre-clean'));
+const executionRuns = () => runs().filter(run => !run.argv.includes('pre-clean')).map(run => ({ ...run,
+  instrumentation: run.argv.filter(arg => ['-Dmaven.ext.class.path=', '-Dlithe.reportOutput=', '-Dlithe.reportWorkspace='].some(prefix => arg.startsWith(prefix))),
+  argv: run.argv.filter(arg => !['-Dmaven.ext.class.path=', '-Dlithe.reportOutput=', '-Dlithe.reportWorkspace='].some(prefix => arg.startsWith(prefix))),
+}));
 const control = value => writeFileSync(controlFile, JSON.stringify(value));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
 async function until(condition, description) {
@@ -42,7 +45,7 @@ async function start() {
     state, javaOptions: [`-Duser.home=${join(scratch, 'home')}`],
     env: { ...process.env, FAKE_MAVEN_CONTROL: controlFile, FAKE_MAVEN_LOG: log } });
   clients.add(client);
-  assert.equal((await client.initialize(workspace, [3])).capabilities.experimental.litheBuild.version, 3);
+  assert.equal((await client.initialize(workspace, [8])).capabilities.experimental.litheBuild.version, 8);
   return client;
 }
 await withInterrupts(async (signal) => {
@@ -69,6 +72,9 @@ await withInterrupts(async (signal) => {
       assert.equal(result.exitCode, 0);
       const run = executionRuns().at(-1);
       assert.equal(run.cwd, root);
+      assert.equal(run.instrumentation.length, 3);
+      assert.ok(run.instrumentation.some(arg => arg.startsWith('-Dlithe.reportOutput=' + state + '/execution-')));
+      assert.deepEqual(result.testResults.tests, []);
       assert.deepEqual(run.argv, ['-B', '-ntp', '-Pci', '-s', '/fixture settings.xml', '-Dmaven.repo.local=/fixture repository', '-o', '-DskipTests', '-pl', 'core', 'package', '-Dmessage=two words']);
       const progress = client.notifications.filter(message => message.method === 'lithe/build/progress' && message.params.operationID === 'package');
       assert.equal(progress.map(message => message.params.output ?? '').join(''), result.output);
@@ -88,6 +94,8 @@ await withInterrupts(async (signal) => {
       const result = await client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest', case: 'greets',
         options: { skipTests: true }, operationID: 'exact-test' }));
       assert.equal(result.exitCode, 0);
+      assert.equal(result.testResults.tests[0].suite, 'demo.core.GreeterTest');
+      assert.equal(result.testResults.tests[0].project, 'nested/core');
       assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-pl', 'core', '-am', '-Dtest=demo.core.GreeterTest#greets', '-Dsurefire.failIfNoSpecifiedTests=false', 'test']);
       const count = executionRuns().length;
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: '*', operationID: 'wildcard' })), /exact Surefire/);
@@ -104,6 +112,15 @@ await withInterrupts(async (signal) => {
       control({ execution: { reportSuite: 'other.demo.core.GreeterTest' } });
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest', case: 'greets',
         operationID: 'wrong-package-test' })), /no fresh result/);
+      control({});
+    });
+    await report.step('malformed or external-entity reports fail closed and release operation state', async () => {
+      for (const badReport of ['broken', 'external-entity']) {
+        control({ execution: { badReport } });
+        await assert.rejects(client.request('lithe/build/test', params({ project: selected,
+          suite: 'demo.core.GreeterTest', operationID: 'bad-' + badReport })));
+        assert.deepEqual((await (await import('node:fs/promises')).readdir(state)).filter(name => name.startsWith('execution-')), []);
+      }
       control({});
     });
     await report.step('a custom goal preserves user arguments and an unknown project cannot execute', async () => {
