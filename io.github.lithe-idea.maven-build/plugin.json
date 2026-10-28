@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 1, "serverProcess": 1 },
+  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 3, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -50,23 +50,23 @@
         {
           "id": "profiles",
           "displayName": "Profiles",
-          "kind": "multiSelect",
+          "kind": "multiSelect", "scope": "instance",
           "choicesFromModel": true,
           "allowCustom": true,
           "presentation": "tree",
           "arguments": ["-P", "${value}"]
         },
-        { "id": "settingsFile", "displayName": "Settings File", "kind": "file", "arguments": ["-s", "${value}"] },
+        { "id": "settingsFile", "displayName": "Settings File", "kind": "file", "scope": "instance", "arguments": ["-s", "${value}"] },
         {
           "id": "localRepository",
           "displayName": "Local Repository",
-          "kind": "directory",
+          "kind": "directory", "scope": "instance",
           "arguments": ["-Dmaven.repo.local=${value}"]
         },
         {
           "id": "offline",
           "displayName": "Offline",
-          "kind": "boolean",
+          "kind": "boolean", "scope": "instance",
           "presentation": "toolbar",
           "icon": { "path": "icons/offline.svg" },
           "arguments": ["-o"]
@@ -74,7 +74,7 @@
         {
           "id": "skipTests",
           "displayName": "Skip Tests",
-          "kind": "boolean",
+          "kind": "boolean", "scope": "instance",
           "presentation": "toolbar",
           "icon": { "path": "icons/skipTests.svg" },
           "arguments": ["-DskipTests"]

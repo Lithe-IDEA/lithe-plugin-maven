@@ -245,3 +245,5 @@ LITHE_CORE_LIBRARY=/absolute/liblithe_core.dylib node scripts/test-configuration
 
 `workflow_dispatch` 的开发 SDK lane 可额外指定 40 位 `core-revision`，构建该宿主 Core 后运行
 原生配置及真实构建/精确测试的集成；SDK、Core 都按明确提交选取，不修改正式锁定文件。
+
+构建选项要求 `buildSystems: 3`，按每个检测到的 reactor 根独立保存；Profiles、settings 文件、仓库、离线和跳过测试不再共享同一个工作区值。宿主升级作用域时须先复制并读回旧 Build 选项，保留已有实例覆盖和显式空选择后再删除旧表示。旧 MavenService 的数据迁移及消费者删除仍属于阶段 D 后续验收，不由这个清单变更代替。
