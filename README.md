@@ -247,3 +247,7 @@ LITHE_CORE_LIBRARY=/absolute/liblithe_core.dylib node scripts/test-configuration
 原生配置及真实构建/精确测试的集成；SDK、Core 都按明确提交选取，不修改正式锁定文件。
 
 构建选项要求 `buildSystems: 3`，按每个检测到的 reactor 根独立保存；Profiles、settings 文件、仓库、离线和跳过测试不再共享同一个工作区值。宿主升级作用域时须先复制并读回旧 Build 选项，保留已有实例覆盖和显式空选择后再删除旧表示。旧 MavenService 的数据迁移及消费者删除仍属于阶段 D 后续验收，不由这个清单变更代替。
+
+工具解析要求 `executableResolution: 2`，通过宿主已有 `project-maven` / `project-maven-jdk` 注册表读取 `.lithe/run/local.json` 的当前实例选择，复用 Run 的配置链。宿主把选中的 Maven 路径以及有限的运行时环境（含 JAVA_HOME/PATH）交给 Provider；Provider 进程自身的 JDK 不等于 Maven 所用的 JDK。显式选择失败不能独立改用其他 Maven；被动导入不执行 Wrapper 或探测版本。
+
+只读配置探针观察 Maven 官方完成默认值填充后的 `MavenExecutionRequest`：先保留所选 settings、Profiles 和仓库事实，再将这次探针自己的仓库管理器隔离到临时 `configuration-*/repository`，在工程导入前退出。仅在 `afterSessionStart` 导出会过晚，可能已经创建用户仓库。读取、保存后的回读与 CLI 覆盖均不得创建实际仓库；临时目录统一清理。真实模型、依赖和构建使用原仓库，不采用此探针隔离。

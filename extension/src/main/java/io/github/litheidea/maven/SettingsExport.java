@@ -17,6 +17,7 @@ import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamReader;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.execution.MavenExecutionRequest;
 import org.apache.maven.settings.Settings;
 import org.apache.maven.settings.building.SettingsBuildingRequest;
 import org.apache.maven.settings.io.xpp3.SettingsXpp3Reader;
@@ -48,17 +49,21 @@ final class SettingsExport {
     }
 
     static Map<String, Object> document(MavenSession session, Capture capture) throws Exception {
+        return document(session.getRequest(), capture);
+    }
+
+    static Map<String, Object> document(MavenExecutionRequest request, Capture capture) throws Exception {
         if (capture == null || capture.effectiveProfiles == null
-                || !capture.installation.current(session.getRequest().getGlobalSettingsFile())
-                || !capture.user.current(session.getRequest().getUserSettingsFile())) {
+                || !capture.installation.current(request.getGlobalSettingsFile())
+                || !capture.user.current(request.getUserSettingsFile())) {
             throw new IllegalStateException("Maven configuration changed during inspection; retry with current files.");
         }
         NativeSource installation = capture.installation;
         NativeSource user = capture.user;
-        String repository = session.getRequest().getLocalRepositoryPath().getAbsolutePath();
-        List<String> profiles = new ArrayList<>(session.getRequest().getActiveProfiles());
-        String repositoryOrigin = session.getUserProperties().containsKey("maven.repo.local")
-                || session.getSystemProperties().containsKey("maven.repo.local") ? "commandLine"
+        String repository = request.getLocalRepositoryPath().getAbsolutePath();
+        List<String> profiles = new ArrayList<>(request.getActiveProfiles());
+        String repositoryOrigin = request.getUserProperties().containsKey("maven.repo.local")
+                || request.getSystemProperties().containsKey("maven.repo.local") ? "commandLine"
                 : present(user.settings.getLocalRepository()) ? "user"
                 : present(installation.settings.getLocalRepository()) ? "installation" : "default";
         // The original SettingsBuildingResult predates CLI population; the

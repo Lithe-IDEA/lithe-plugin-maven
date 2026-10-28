@@ -68,6 +68,7 @@ await withInterrupts(async signal => {
       assert.ok(!JSON.stringify(snapshot).includes('fixture-secret-sentinel'));
       assert.deepEqual([readFileSync(user), readFileSync(installation)], sourcesBefore);
       assert.equal(existsSync(join(root, 'target')), false);
+      assert.equal(existsSync(repository), false, 'Reading inherited configuration must not create its repository');
     });
     await report.step('Core edits the approved native field and Maven re-reads the saved source', async () => {
       const source = snapshot.sources.find(source => source.id === 'user');
@@ -84,6 +85,7 @@ await withInterrupts(async signal => {
       assert.equal(field.effectiveValue, field.value);
       assert.ok(!JSON.stringify(updated).includes('fixture-secret-sentinel'));
       assert.deepEqual(readFileSync(installation), sourcesBefore[1]);
+      assert.equal(existsSync(join(scratch, 'saved-repository')), false, 'Readback must not initialize the newly selected repository');
     });
     await report.step('effective CLI overrides remain distinct from the editable native value', async () => {
       const updated = await client.request('lithe/build/configuration', request({ settingsFile: user,
@@ -95,6 +97,7 @@ await withInterrupts(async signal => {
       assert.equal(repositoryField.effectiveSource, 'commandLine');
       assert.deepEqual(fields.find(field => field.id === 'activeProfiles').value, ['ci']);
       assert.ok(fields.find(field => field.id === 'activeProfiles').effectiveValue.includes('cli-profile'));
+      assert.equal(existsSync(join(scratch, 'cli-repository')), false, 'CLI overrides must remain facts without repository writes');
     });
     await report.step('older wire versions refuse configuration instead of invoking another method', async () => {
       const old = await start(6);

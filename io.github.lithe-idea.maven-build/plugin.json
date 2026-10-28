@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 3, "serverProcess": 1 },
+  "requires": { "buildProviders": 7, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -23,25 +23,9 @@
         "nesting": "outermost"
       },
       "invocation": {
-        "executables": [
-          {
-            "kind": "projectFile",
-            "path": "mvnw",
-            "requires": [".mvn/wrapper/maven-wrapper.properties"],
-            "platforms": ["macos", "linux"]
-          },
-          {
-            "kind": "projectFile",
-            "path": "mvnw.cmd",
-            "requires": [".mvn/wrapper/maven-wrapper.properties"],
-            "platforms": ["windows"]
-          },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn", "platforms": ["macos", "linux"] },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn.cmd", "platforms": ["windows"] },
-          { "kind": "command", "command": "mvn" }
-        ],
-        "environmentInputs": ["MAVEN_HOME"],
-        "runtimeDependencies": [{ "id": "java", "minimumVersion": "8" }],
+        "executables": [{ "kind": "toolchain", "toolchainID": "project-maven" }],
+        "runtimeDependencies": [{ "id": "java", "minimumVersion": "8",
+          "executables": [{ "kind": "toolchain", "toolchainID": "project-maven-jdk" }] }],
         "globalArguments": [],
         "version": { "arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)" },
         "minimumVersion": "3.6.3"

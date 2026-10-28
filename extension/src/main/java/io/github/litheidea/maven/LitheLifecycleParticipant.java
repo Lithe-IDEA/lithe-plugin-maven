@@ -57,10 +57,8 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
         String context = property(session, "lithe.configurationContextOutput");
         if (output == null && context == null) return;
         try {
-            String document = Json.write(output == null
-                    ? SettingsExport.context(session, settingsEvents.capture())
-                    : SettingsExport.document(session, settingsEvents.capture()));
-            write(output == null ? context : output, document);
+            if (output != null) settingsEvents.requireConfigurationExported();
+            else write(context, Json.write(SettingsExport.context(session, settingsEvents.capture())));
         } catch (Exception error) {
             throw new MavenExecutionException("Lithe could not inspect Maven configuration.", error);
         }
@@ -89,7 +87,7 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
         return value == null || value.trim().isEmpty() ? null : value.trim();
     }
 
-    private static void write(String output, String json) throws MavenExecutionException {
+    static void write(String output, String json) throws MavenExecutionException {
         Path path = Paths.get(output);
         try {
             Files.write(path, json.getBytes(StandardCharsets.UTF_8));
