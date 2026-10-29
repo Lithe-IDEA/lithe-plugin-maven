@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 8, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
+  "requires": { "buildProviders": 9, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -182,6 +182,7 @@
       "test": {
         "scopes": ["workspace", "project"],
         "filters": ["suite", "case"],
+        "selectorKinds": ["java.test.fullName"],
         "source": "provider",
         "arguments": [],
         "results": {

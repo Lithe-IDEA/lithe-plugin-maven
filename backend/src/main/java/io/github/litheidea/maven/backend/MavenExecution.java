@@ -43,15 +43,10 @@ final class MavenExecution {
             command.add("-pl");
             command.add(root.relativize(project).toString());
         }
-        String suite = null, method = null;
+        MavenTestSelection selection = MavenTestSelection.from(params);
         if (tests) {
-            suite = filter(params.get("suite"), false);
-            method = filter(params.get("case"), true);
-            if (method != null && suite == null) throw invalid("A Maven test method needs its suite.");
-            if (suite != null) {
+            if (selection.isFiltered()) {
                 if (project != null && !project.equals(root)) command.add("-am");
-                command.add("-Dtest=" + suite + (method == null ? "" : "#" + method));
-                command.add("-Dsurefire.failIfNoSpecifiedTests=false");
             }
             command.add("test");
         } else if ("plugin-goal".equals(task)) {
@@ -63,8 +58,14 @@ final class MavenExecution {
         List<String> arguments = strings(params.get("userArguments"));
         if ("goal".equals(task) && arguments.isEmpty()) throw invalid("A custom Maven goal needs arguments.");
         command.addAll(arguments);
+        // Typed selectors outrank raw CLI properties; the user must not
+        // accidentally turn an exact test action into an unfiltered run.
+        if (tests && selection.isFiltered()) {
+            command.add(selection.argument());
+            command.add("-Dsurefire.failIfNoSpecifiedTests=false");
+        }
         try (MavenTestReports reports = new MavenTestReports(state, workspace)) {
-        reports.instrument(command, extension);
+        reports.instrument(command, extension, tests ? project : null);
         context.throwIfCancelled();
         Output output = new Output(context);
         Processes.Result result;
@@ -76,7 +77,15 @@ final class MavenExecution {
             throw error;
         }
         context.throwIfCancelled();
-        Map<String, Object> testResults = reports.read(context, suite, method, tests && result.exitCode() == 0);
+        Map<String, Object> testResults = reports.read(context);
+        if (tests && result.exitCode() == 0 && selection.isFiltered()) {
+            String owner = project == null ? null : workspace.relativize(project).toString().replace(java.io.File.separatorChar, '/');
+            selection.verify(testResults, "".equals(owner) ? "." : owner);
+        }
+        if (tests) selection.addCoverage(testResults);
+        if (Json.stringify(testResults).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_OUTPUT_BYTES) {
+            throw new PluginError("maven.outputTooLarge", "Maven's canonical test report exceeds its result budget.");
+        }
         Map<String, Object> reply = new LinkedHashMap<>();
         reply.put("exitCode", result.exitCode());
         reply.put("output", output.text());
@@ -135,16 +144,6 @@ final class MavenExecution {
                     && goal instanceof String && goal.equals(Json.object(known.get("properties")).get("goal"))) return (String) goal;
         }
         throw invalid("The plugin goal is absent from the current Maven model.");
-    }
-
-    private static String filter(Object value, boolean method) {
-        if (value == null) return null;
-        String text = optionalString(value);
-        // Surefire treats punctuation as patterns. Exact selectors must not widen to another test.
-        if (text == null || !text.matches(method ? "[A-Za-z_$][A-Za-z0-9_$]*" : "[A-Za-z_$][A-Za-z0-9_.$]*")) {
-            throw invalid("The test selector cannot be represented as an exact Surefire class or method.");
-        }
-        return text;
     }
 
     private static boolean booleanOption(Map<String, Object> options, String name) {

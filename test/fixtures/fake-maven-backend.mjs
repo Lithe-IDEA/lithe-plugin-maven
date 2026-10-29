@@ -48,7 +48,10 @@ if (!exporting) {
   console.log("[WARNING] " + join(process.cwd(), "core/src/main/java/demo/core/Greeter.java") + ":[1,1] test diagnostic");
   const selector = argv.find(argument => argument.startsWith("-Dtest="))?.slice(7);
   if (selector && !control.noReport) {
-    const [selectedSuite, method = "greets"] = selector.split("#");
+    const quoted = /^%regex\[\\Q(.+?)\\E(?:#\\Q(.+?)\\E.*?)?\]$/.exec(selector);
+    const [selectedSuite, method = "greets"] = quoted
+      ? [quoted[1].replace(/\.class$/, '').replaceAll('/', '.'), quoted[2]]
+      : selector.split("#");
     const suite = control.reportSuite ?? selectedSuite;
     const directory = join(process.cwd(), "core/target/surefire-reports");
     mkdirSync(directory, { recursive: true });
@@ -60,7 +63,7 @@ if (!exporting) {
       const file = join(dirname(value("lithe.reportOutput")), 'report-0.xml');
       writeFileSync(file, xml);
       writeFileSync(value("lithe.reportOutput"), JSON.stringify({ format: 'litheMavenOperationReports', version: 1,
-        reports: [{ file: 'report-0.xml', project: relative(value("lithe.reportWorkspace"), join(process.cwd(), 'core')),
+        reports: [{ file: 'report-0.xml', project: control.reportProject ?? relative(value("lithe.reportWorkspace"), join(process.cwd(), 'core')),
           sha256: createHash('sha256').update(xml).digest('hex') }] }));
     }
   }

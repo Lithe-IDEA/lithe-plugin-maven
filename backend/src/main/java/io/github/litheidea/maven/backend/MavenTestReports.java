@@ -43,13 +43,14 @@ final class MavenTestReports implements AutoCloseable {
         Files.write(directory.resolve("index.json"), Json.stringify(initial).getBytes(StandardCharsets.UTF_8));
     }
 
-    void instrument(List<String> command, Path extension) {
+    void instrument(List<String> command, Path extension, Path testProject) {
+        command.add("-Dlithe.testProject=" + (testProject == null ? "" : testProject));
         command.add("-Dmaven.ext.class.path=" + extension);
         command.add("-Dlithe.reportOutput=" + directory.resolve("index.json"));
         command.add("-Dlithe.reportWorkspace=" + workspace);
     }
 
-    Map<String, Object> read(CallContext context, String suite, String method, boolean requireMatch) throws Exception {
+    Map<String, Object> read(CallContext context) throws Exception {
         Map<String, Object> index = Json.object(Json.parse(new String(read(directory.resolve("index.json"), MAX_BYTES), StandardCharsets.UTF_8)));
         if (!"litheMavenOperationReports".equals(index.get("format")) || !(index.get("version") instanceof Number)
                 || ((Number) index.get("version")).intValue() != 1 || index.containsKey("error") || !(index.get("reports") instanceof List)) {
@@ -59,7 +60,6 @@ final class MavenTestReports implements AutoCloseable {
         if (files.size() > 10000) throw invalid("Maven test reports exceed the report count budget.");
         List<Object> tests = new ArrayList<>();
         int total = 0;
-        boolean matched = false;
         for (Object value : files) {
             context.throwIfCancelled();
             Map<String, Object> entry = Json.object(value);
@@ -87,6 +87,7 @@ final class MavenTestReports implements AutoCloseable {
                         if (tests.size() >= 10000) throw invalid("Maven test cases exceed the result budget.");
                         String name = test.getFullClassName();
                         String testName = test.getName();
+                        if (testName != null) testName = MavenTestSelection.reportMethod(testName);
                         if (name == null || name.isEmpty() || testName == null || testName.isEmpty()) throw invalid("Maven produced an unnamed test result.");
                         double time = test.getTime();
                         if (!Double.isFinite(time) || time < 0 || time * 1000 > 9_007_199_254_740_991L) throw invalid("Maven produced an invalid test duration.");
@@ -99,13 +100,10 @@ final class MavenTestReports implements AutoCloseable {
                         if (message == null || message.isEmpty()) message = test.getFailureDetail();
                         if (message != null && !message.isEmpty()) item.put("message", message.substring(0, Math.min(message.length(), 16000)));
                         tests.add(item);
-                        if (suite != null && (suite.equals(name) || !suite.contains(".") && name.endsWith("." + suite))
-                                && (method == null || method.equals(testName))) matched = true;
                     }
                 }
             }
         }
-        if (requireMatch && suite != null && !matched) throw new PluginError("maven.noMatchingTests", "Surefire produced no fresh result for the selected class or method.");
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("format", "litheTestResults"); document.put("version", 1); document.put("tests", tests);
         if (Json.stringify(document).getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) throw invalid("Maven's canonical test report exceeds its result budget.");

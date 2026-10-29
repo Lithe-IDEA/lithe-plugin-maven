@@ -257,3 +257,14 @@ LITHE_CORE_LIBRARY=/absolute/liblithe_core.dylib node scripts/test-configuration
 工具解析要求 `executableResolution: 2`，通过宿主已有 `project-maven` / `project-maven-jdk` 注册表读取 `.lithe/run/local.json` 的当前实例选择，复用 Run 的配置链。宿主把选中的 Maven 路径以及有限的运行时环境（含 JAVA_HOME/PATH）交给 Provider；Provider 进程自身的 JDK 不等于 Maven 所用的 JDK。显式选择失败不能独立改用其他 Maven；被动导入不执行 Wrapper 或探测版本。
 
 只读配置探针观察 Maven 官方完成默认值填充后的 `MavenExecutionRequest`：先保留所选 settings、Profiles 和仓库事实，再将这次探针自己的仓库管理器隔离到临时 `configuration-*/repository`，在工程导入前退出。仅在 `afterSessionStart` 导出会过晚，可能已经创建用户仓库。读取、保存后的回读与 CLI 覆盖均不得创建实际仓库；临时目录统一清理。真实模型、依赖和构建使用原仓库，不采用此探针隔离。
+
+开发协议 9 还接受 JDT 提供的公开 `java.test.fullName` 标识。宿主原样转交标识，
+Maven 后端才把类或 `类#方法()` 映射成 Surefire 的精确选择器；不按源码文件名猜类名。
+不能精确表示的签名或模式会明确拒绝。成功执行还要求所选工程的新报告包含每个标识，
+依赖模块里的同名用例不能代替它。空选择列表只在明确的工作区/工程测试范围运行全部测试。
+
+精确筛选使用 Surefire 公开 `%regex[class#method]` 接口，引用完整类文件路径，
+避免普通全限定名模式的 `**/` 后缀匹配。参数化调用归并到同一 Java 方法；报告明确
+区分工程和覆盖范围，整类重跑才能移除该类过时的方法结果。`-am` 仍编译依赖，
+已配置的测试 Mojo 通过公开 setter 跳过未选工程；原始 `-Dtest=*` 不会扩大类型化选择。
+没有明确整类选择时，继承的上游筛选可能仍有效，所以只声明报告中返回的方法覆盖。

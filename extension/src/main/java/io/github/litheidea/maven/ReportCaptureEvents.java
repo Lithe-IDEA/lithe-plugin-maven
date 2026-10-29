@@ -46,6 +46,16 @@ public final class ReportCaptureEvents extends AbstractEventSpy implements MojoE
             Path state = Paths.get(output).toAbsolutePath().normalize().getParent().toRealPath();
             Path workspace = Paths.get(event.getSession().getUserProperties().getProperty("lithe.reportWorkspace")).toRealPath();
             Path project = event.getProject().getBasedir().toPath().toRealPath();
+            String selected = event.getSession().getUserProperties().getProperty("lithe.testProject");
+            if (selected != null && !selected.isEmpty() && !project.equals(Paths.get(selected).toRealPath())) {
+                // Maven's -am must still build prerequisites, but the configured
+                // Surefire/Failsafe mojo must not run their same-named tests.
+                // This is the upstream public setter after Maven has applied
+                // CLI/POM precedence, not a second model/configuration reader.
+                event.getMojo().getClass().getMethod("setSkipTests", boolean.class).invoke(event.getMojo(), true);
+                return;
+            }
+
             if (!project.startsWith(workspace)) throw new IOException("Report project leaves the workspace.");
             // The actual configured mojo owns interpolation and -D precedence.
             // Both upstream plugins expose this public getter; there is no POM

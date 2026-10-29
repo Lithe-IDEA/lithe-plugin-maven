@@ -45,7 +45,7 @@ await withInterrupts(async (signal) => {
       state: join(scratch, 'state'), timeoutMs: mavenTimeout() });
     await report.step('Core admits the new Maven capability and produces only Provider plans', async () => {
       coreCommand('plugins.declarative.validate', { manifest });
-      assert.equal((await client.initialize(workspace, [8])).capabilities.experimental.litheBuild.version, 8);
+      assert.equal((await client.initialize(workspace, [9])).capabilities.experimental.litheBuild.version, 9);
       for (const task of manifest.buildSystems[0].tasks) { assert.equal(task.source, 'provider'); assert.deepEqual(task.arguments, []); }
       assert.equal(manifest.buildSystems[0].test.source, 'provider');
     });
@@ -79,6 +79,85 @@ await withInterrupts(async (signal) => {
       assert.equal(tests.tests[0].case, 'greetsByName');
       const progress = client.notifications.filter(message => message.method === 'lithe/build/progress' && message.params.operationID === 'exact-test');
       assert.equal(progress.map(message => message.params.output ?? '').join(''), result.output);
+    });
+    await report.step('Core forwards semantic test identities and Maven reports the exact selected method', async () => {
+      const selectors = ['demo.core.GreeterTest#greetsByName()'];
+      const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors, userArguments: [] })).plan;
+      assert.deepEqual(plan.provider.params.selectors, selectors);
+      assert.equal(plan.provider.params.suite, undefined);
+      const result = await send(plan, 'semantic-test');
+      assert.equal(result.exitCode, 0, result.output);
+      const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+        projects: model.projects.map(value => value.path), result: result.testResults }).results;
+      assert.equal(decoded.summary.total, 1);
+      assert.equal(decoded.tests[0].case, 'greetsByName');
+      assert.equal(decoded.tests[0].project, 'nested/core');
+    });
+    await report.step('Unicode Java class and method identities survive the full Core Maven report roundtrip', async () => {
+      const source = join(workspace, root, 'core/src/test/java/demo/core/测试.java');
+      try {
+        writeFileSync(source, 'package demo.core; public class 测试 { @org.junit.Test public void 校验() { org.junit.Assert.assertTrue(true); } }');
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.测试#校验()'] })).plan;
+        const result = await send(plan, 'unicode-semantic-test');
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].suite, 'demo.core.测试');
+        assert.equal(decoded.tests[0].case, '校验');
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('an exact class cannot execute a different package with the same class-path suffix', async () => {
+      const directory = join(workspace, root, 'core/src/test/java/other/demo/core');
+      const source = join(directory, 'GreeterTest.java');
+      mkdirSync(directory, { recursive: true });
+      try {
+        writeFileSync(source, 'package other.demo.core; public class GreeterTest { @org.junit.Test public void greetsByName() { org.junit.Assert.fail("wrong package executed"); } }');
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.GreeterTest'] })).plan;
+        const result = await send(plan, 'exact-package-test');
+        assert.equal(result.exitCode, 0, result.output);
+        assert.deepEqual([...new Set(result.testResults.tests.map(value => value.suite))], ['demo.core.GreeterTest']);
+        assert.deepEqual(result.testResults.coverage, [{ project: 'nested/core', suite: 'demo.core.GreeterTest' }]);
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('parameterized invocations preserve the method selector, severity, count and total duration', async () => {
+      const source = join(workspace, root, 'core/src/test/java/demo/core/ParameterizedTest.java');
+      try {
+        writeFileSync(source, `package demo.core; @org.junit.runner.RunWith(org.junit.runners.Parameterized.class)
+          public class ParameterizedTest {
+            @org.junit.runners.Parameterized.Parameters public static java.util.Collection<Object[]> inputs() {
+              return java.util.Arrays.asList(new Object[][] {{1}, {2}}); }
+            public ParameterizedTest(int value) {} @org.junit.Test public void checks() { org.junit.Assert.assertTrue(true); }
+          }`);
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.ParameterizedTest#checks()'] })).plan;
+        const result = await send(plan, 'parameterized-method-test');
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].case, 'checks');
+        assert.equal(decoded.tests[0].invocations, 2);
+        assert.equal(decoded.tests[0].durationMillis, result.testResults.tests.reduce((sum, test) => sum + test.durationMillis, 0));
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('project selection builds prerequisites without running their identical test class', async () => {
+      const coreSource = join(workspace, root, 'core/src/test/java/demo/core/GreeterTest.java');
+      const original = readFileSync(coreSource, 'utf8');
+      const directory = join(workspace, root, 'app/src/test/java/demo/core');
+      const appSource = join(directory, 'GreeterTest.java');
+      const appPom = join(workspace, root, 'app/pom.xml');
+      const originalPom = readFileSync(appPom, 'utf8');
+      mkdirSync(directory, { recursive: true });
+      try {
+        writeFileSync(coreSource, original.replace(/}\s*$/, '@org.junit.Test public void scopedMethod() { org.junit.Assert.fail("dependency test executed"); } }'));
+        writeFileSync(appPom, originalPom.replace('</dependencies>', '<dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency></dependencies>'));
+        writeFileSync(appSource, 'package demo.core; public class GreeterTest { @org.junit.Test public void scopedMethod() { org.junit.Assert.assertTrue(true); } }');
+        const app = model.projects.find(value => value.name === 'app');
+        const plan = build('build.testPlan', planned({ project: app, selectorKind: 'java.test.fullName',
+          selectors: ['demo.core.GreeterTest#scopedMethod()'], userArguments: ['-Dtest=*', '-DskipTests=false'] })).plan;
+        const result = await send(plan, 'exact-project-test');
+        assert.equal(result.exitCode, 0, result.output);
+        assert.deepEqual(result.testResults.tests.map(value => [value.project, value.suite, value.case]),
+          [['nested/app', 'demo.core.GreeterTest', 'scopedMethod']]);
+      } finally { writeFileSync(coreSource, original); writeFileSync(appPom, originalPom); rmSync(appSource, { force: true }); }
     });
     await report.step('an unknown method cannot pass with a fresh empty Surefire report', async () => {
       const plan = build('build.testPlan', planned({ project, suite: 'demo.core.GreeterTest', case: 'doesNotExist', userArguments: [] })).plan;
@@ -148,6 +227,7 @@ await withInterrupts(async (signal) => {
       delete consumer.buildSystems[0].modelSharing;
       delete consumer.buildSystems[0].configuration;
       delete consumer.buildSystems[0].test.results;
+      delete consumer.buildSystems[0].test.selectorKinds;
       consumer.buildSystems[0].modelInputs = [{ pluginID: id, buildSystemID: 'maven' }];
       const snapshot = coreCommand('build.resolveModelInputs', { manifest: consumer, buildSystemID: 'maven', request: { revision: 11,
         sources: [{ manifest, instances: [{ buildSystemID: 'maven', root, state: 'ready', model, options }] }] } }).modelInputs;
@@ -160,6 +240,26 @@ await withInterrupts(async (signal) => {
       assert.equal(facts.options.settingsFile, undefined);
       const plan = coreCommand('build.modelPlan', { manifest: consumer, buildSystemID: 'maven', request: planned({ modelInputs: snapshot }) }).plan;
       assert.deepEqual(plan.provider.params.modelInputs, snapshot);
+    });
+    await report.step('a module opened as the workspace retains the dot project identity', async () => {
+      const module = join(workspace, root, 'core');
+      const standalone = new BackendClient({ java: process.env.LITHE_TEST_JAVA ?? 'java', jar: join(pkg, 'lib/lithe-maven-backend.jar'),
+        state: join(scratch, 'module-state'), timeoutMs: mavenTimeout() });
+      try {
+        await standalone.initialize(module, [9]);
+        const plan = build('build.testPlan', { root: '.', options: {}, project: { name: 'core', path: '.' },
+          selectorKind: 'java.test.fullName', selectors: ['demo.core.GreeterTest#greetsByName()'] }).plan;
+        const result = await standalone.request(plan.provider.method, { ...plan.provider.params,
+          tool: { executable: maven }, operationID: 'module-workspace-test' });
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: module, root: '.', project: '.', result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].project, '.');
+        assert.equal(decoded.tests[0].case, 'greetsByName');
+      } finally {
+        standalone.kill();
+        await bounded(standalone.exited, 'module backend cleanup');
+      }
     });
     await report.step('close the backend and preserve the entire plugin package', async () => {
       assert.equal(await client.close(), 0);
