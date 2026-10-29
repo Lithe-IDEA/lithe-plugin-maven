@@ -29,10 +29,13 @@ final class MavenExecution {
     static Map<String, Object> run(Map<String, Object> params, CallContext context, Path root, Path workspace,
             Path maven, Map<String, String> environment, MavenRuns.Loaded loaded, boolean tests, Path extension, Path state) throws Exception {
         String task = tests ? "test" : Json.string(params, "task");
-        if (!tests && !LIFECYCLE.contains(task) && !"plugin-goal".equals(task) && !"goal".equals(task)) {
+        boolean prepareMain = "java-prepare-run-main".equals(task), prepareTest = "java-prepare-run-test".equals(task);
+        if (!tests && !prepareMain && !prepareTest && !LIFECYCLE.contains(task) && !"plugin-goal".equals(task) && !"goal".equals(task)) {
             throw invalid("Unknown Maven task.");
         }
         Path project = selectedProject(params.get("project"), root, workspace, loaded);
+        if ((prepareMain || prepareTest) && (project == null || params.get("modelTask") != null
+                || !strings(params.get("userArguments")).isEmpty())) throw invalid("Java resource preparation needs one current project and no raw goals.");
         if (params.get("target") != null) throw invalid("Maven tasks do not accept a target selector.");
         List<String> command = new ArrayList<>();
         command.add(maven.toString());
@@ -49,6 +52,10 @@ final class MavenExecution {
                 if (project != null && !project.equals(root)) command.add("-am");
             }
             command.add("test");
+        } else if (prepareMain || prepareTest) {
+            if (!project.equals(root)) command.add("-am");
+            command.add("resources:resources");
+            if (prepareTest) command.add("resources:testResources");
         } else if ("plugin-goal".equals(task)) {
             command.add(pluginGoal(params.get("modelTask"), project, root, loaded));
         } else if (!"goal".equals(task)) {

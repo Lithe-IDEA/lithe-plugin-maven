@@ -80,6 +80,24 @@
       "modelSharing": { "options": ["profiles", "offline", "skipTests"] },
       "tasks": [
         {
+          "id": "java-prepare-run-main",
+          "displayName": "resources:resources",
+          "group": "build",
+          "category": ["Lifecycle"],
+          "scopes": ["project"],
+          "source": "provider",
+          "arguments": []
+        },
+        {
+          "id": "java-prepare-run-test",
+          "displayName": "resources:resources + resources:testResources",
+          "group": "build",
+          "category": ["Lifecycle"],
+          "scopes": ["project"],
+          "source": "provider",
+          "arguments": []
+        },
+        {
           "id": "clean",
           "displayName": "clean",
           "group": "lifecycle",

@@ -268,3 +268,8 @@ Maven 后端才把类或 `类#方法()` 映射成 Surefire 的精确选择器；
 区分工程和覆盖范围，整类重跑才能移除该类过时的方法结果。`-am` 仍编译依赖，
 已配置的测试 Mojo 通过公开 setter 跳过未选工程；原始 `-Dtest=*` 不会扩大类型化选择。
 没有明确整类选择时，继承的上游筛选可能仍有效，所以只声明报告中返回的方法覆盖。
+
+Java 启动前的公开项目任务 `java-prepare-run-main`／`java-prepare-run-test`
+分别通过 Maven 的 `resources:resources`，或再加 `resources:testResources` 处理资源。
+自定义目录、过滤和 Profile 由当前 Maven 模型处理；依赖仍按 `-am` 参与，不在宿主
+重新解析 POM。任务需要当前工程且不接受附加目标，失败或取消不能作为启动成功。

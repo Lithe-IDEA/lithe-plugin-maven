@@ -67,6 +67,30 @@ await withInterrupts(async (signal) => {
       const decoded = build('build.decodeDiagnostics', { workspaceRoot: workspace, root, output: result.output });
       assert.deepEqual(decoded.diagnostics, []);
     });
+    await report.step('Java preparation preserves Maven filtering, custom roots and main versus test resources', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      const resources = join(directory, 'custom inputs'), testResources = join(directory, 'test inputs');
+      mkdirSync(resources); mkdirSync(testResources);
+      writeFileSync(join(resources, 'runtime.properties'), 'selected=${prepared.value}');
+      writeFileSync(join(testResources, 'test.properties'), 'test=${prepared.value}');
+      try {
+        writeFileSync(pom, original.replace('</project>', `<build><resources><resource><directory>custom inputs</directory><filtering>true</filtering></resource></resources>
+          <testResources><testResource><directory>test inputs</directory><filtering>true</filtering></testResource></testResources></build>
+          <profiles><profile><id>prepared</id><properties><prepared.value>upstream</prepared.value></properties></profile></profiles></project>`));
+        const plan = task => build('build.taskPlan', planned({ task, project, options: { profiles: ['prepared'] } })).plan;
+        const main = await send(plan('java-prepare-run-main'), 'prepare-main-resources');
+        assert.equal(main.exitCode, 0, main.output);
+        assert.equal(readFileSync(join(directory, 'target/classes/runtime.properties'), 'utf8'), 'selected=upstream');
+        assert.equal(existsSync(join(directory, 'target/test-classes/test.properties')), false);
+        const tests = await send(plan('java-prepare-run-test'), 'prepare-test-resources');
+        assert.equal(tests.exitCode, 0, tests.output);
+        assert.equal(readFileSync(join(directory, 'target/test-classes/test.properties'), 'utf8'), 'test=upstream');
+        await assert.rejects(send(build('build.taskPlan', planned({ task: 'java-prepare-run-main', project, userArguments: ['verify'] })).plan,
+          'reject-extra-resource-goals'), /no raw goals/);
+      } finally { writeFileSync(pom, original); rmSync(resources, { recursive: true, force: true }); rmSync(testResources, { recursive: true, force: true }); }
+    });
     await report.step('Core and Surefire run one exact method and decode one report result', async () => {
       testPlan = build('build.testPlan', planned({ project, suite: 'demo.core.GreeterTest', case: 'greetsByName', userArguments: [] })).plan;
       assert.equal(testPlan.provider.method, 'lithe/build/test');

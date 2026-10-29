@@ -81,6 +81,18 @@ await withInterrupts(async (signal) => {
       assert.equal(progress.map(message => message.params.output ?? '').join(''), result.output);
       assert.match(result.output, /\[WARNING\]/);
     });
+    await report.step('Java resource tasks preserve effective options and refuse missing projects or injected goals', async () => {
+      for (const [task, goals] of [['java-prepare-run-main', ['resources:resources']],
+        ['java-prepare-run-test', ['resources:resources', 'resources:testResources']]]) {
+        const result = await client.request('lithe/build/execute', params({ task, project: selected, options: { profiles: ['ci'] }, operationID: task }));
+        assert.equal(result.exitCode, 0);
+        assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-Pci', '-pl', 'core', '-am', ...goals]);
+        const count = executionRuns().length;
+        await assert.rejects(client.request('lithe/build/execute', params({ task, operationID: task + '-no-project' })), /current project/);
+        await assert.rejects(client.request('lithe/build/execute', params({ task, project: selected, userArguments: ['verify'], operationID: task + '-raw' })), /no raw goals/);
+        assert.equal(executionRuns().length, count);
+      }
+    });
     await report.step('model goals are checked against the current Maven extension output', async () => {
       const modelTask = { name: 'compiler:compile', path: 'nested/core', properties: { goal: 'org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile' } };
       const result = await client.request('lithe/build/execute', params({ task: 'plugin-goal', project: selected, modelTask, operationID: 'goal' }));
