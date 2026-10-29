@@ -108,6 +108,39 @@ await withInterrupts(async (signal) => {
       rmSync(failure);
       writeFileSync(pom, original);
     });
+    await report.step('verify retains Failsafe failures alongside fresh Surefire results', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      const integration = join(directory, 'src/test/java/demo/core/FailureIT.java');
+      try {
+        writeFileSync(pom, original.replace('</project>', `<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId><version>3.5.2</version>
+          <configuration><reportsDirectory>\${project.build.directory}/integration reports</reportsDirectory></configuration>
+          <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+          </plugin></plugins></build></project>`));
+        writeFileSync(integration, 'package demo.core; public class FailureIT { @org.junit.Test public void failsInIntegration() { org.junit.Assert.fail("expected Failsafe failure"); } }');
+        // Clean removes the preceding failing class after its source was removed.
+        // Maven owns both phases; the host must not merge stale report directories.
+        const plan = build('build.taskPlan', planned({ task: 'goal', project, userArguments: ['clean', 'verify'] })).plan;
+        const result = await send(plan, 'failsafe-verify');
+        assert.notEqual(result.exitCode, 0, result.output);
+        assert.ok(existsSync(join(directory, 'target/integration reports/TEST-demo.core.FailureIT.xml')));
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+          projects: model.projects.map(value => value.path), result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 3, JSON.stringify(decoded));
+        assert.equal(decoded.summary.passed, 2, JSON.stringify(decoded));
+        assert.equal(decoded.summary.failed, 1, JSON.stringify(decoded));
+        assert.ok(decoded.tests.every(test => test.project === 'nested/core'));
+        const failed = decoded.tests.find(test => test.case === 'failsInIntegration');
+        assert.equal(failed?.status, 'failed');
+        assert.match(failed.message, /expected Failsafe failure/);
+        assert.deepEqual((await (await import('node:fs/promises')).readdir(join(scratch, 'state'))).filter(name => name.startsWith('execution-')), []);
+      } finally {
+        rmSync(integration, { force: true });
+        writeFileSync(pom, original);
+      }
+    });
     await report.step('publish the same normalized Maven facts and effective options to a declared consumer', () => {
       const consumer = JSON.parse(JSON.stringify(manifest));
       consumer.id = 'org.example.maven-input-consumer';
