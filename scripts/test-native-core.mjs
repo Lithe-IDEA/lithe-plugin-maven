@@ -419,7 +419,10 @@ await withInterrupts(async (signal) => {
         } }`);
       const java = process.env.LITHE_TEST_JAVA ?? 'java';
       const javac = java.includes('/') ? join(resolve(java, '..'), 'javac') : 'javac';
-      await runCommand(javac, [helper], { signal, timeoutMs: 10000 });
+      // JDI lives in tools.jar on Java 8, including at javac time. Resolve it
+      // from the selected helper JDK, not Maven's potentially different JAVA_HOME.
+      const tools = join(java.includes('/') ? resolve(java, '../..') : process.env.JAVA_HOME ?? '', 'lib/tools.jar');
+      await runCommand(javac, [...(existsSync(tools) ? ['-cp', tools] : []), helper], { signal, timeoutMs: 10000 });
       let debugOutput = '', ready;
       const listening = new Promise(resolve => { ready = resolve; });
       const controller = new AbortController(), abort = () => controller.abort(signal.reason);
@@ -432,7 +435,6 @@ await withInterrupts(async (signal) => {
       try {
         await bounded(Promise.race([listening, running.then(() => { throw new Error('JVM exited before the debug listener: ' + debugOutput); })]), 'suspended framework JVM', 20000);
         assert.ok(!debugOutput.includes('Hello, Provider'), 'the application must be suspended before attachment');
-        const tools = join(process.env.JAVA_HOME ?? resolve(realpathSync(java), '../..'), 'lib/tools.jar');
         await runCommand(java, ['-cp', scratch + (existsSync(tools) ? delimiter + tools : ''), 'ResumeJvm', String(port)], { signal, timeoutMs: 10000 });
         await running;
         assert.ok(debugOutput.includes('Hello, Provider') && debugOutput.includes('POMFLAG=preserved'), debugOutput);

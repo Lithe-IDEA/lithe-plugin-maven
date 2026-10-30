@@ -181,6 +181,17 @@ jobs:
           export LITHE_TEST_MAVEN="${MVN:-$(command -v mvn)}"
           node scripts/test-configuration.mjs
           node scripts/test-native-core.mjs
+      - name: Verify Quarkus and Micronaut suspended JVMs with standard JDI
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        env:
+          # These pinned framework versions require Java 17 and modern Maven;
+          # the Java 8 / Maven 3.6.3 Provider lane above remains independent.
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_17_X64 }}/bin/java
+          LITHE_MAVEN_TIMEOUT_MS: 300000
+        run: |
+          export LITHE_CORE_LIBRARY="$GITHUB_WORKSPACE/.artifacts/core-source/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="$(command -v mvn)"
+          node scripts/test-framework-debug.mjs
       - name: Prove the release inputs stayed unchanged
         run: |
           git diff --exit-code -- sdk.lock.json backend/pom.xml extension/pom.xml io.github.lithe-idea.maven-build

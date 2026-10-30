@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Properties;
 import org.apache.maven.plugin.MojoExecution;
+import org.apache.maven.plugin.PluginParameterExpressionEvaluator;
 import org.apache.maven.plugin.descriptor.Parameter;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
@@ -15,6 +16,7 @@ import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
 import org.apache.maven.execution.ProjectExecutionEvent;
+import org.apache.maven.execution.MavenSession;
 import org.apache.maven.execution.ProjectExecutionListener;
 import org.apache.maven.lifecycle.LifecycleExecutionException;
 import org.apache.maven.lifecycle.internal.GoalTask;
@@ -57,7 +59,7 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
                     configure(execution, framework.runtimeProperty, arguments(event, "runtime"));
                     configure(execution, framework.argumentsProperty, arguments(event, "arguments"));
                     String debugPort = event.getSession().getUserProperties().getProperty("lithe.run.debugPort");
-                    if (debugPort != null) configureDebug(execution, framework, debugPort);
+                    if (debugPort != null) configureDebug(execution, framework, debugPort, event.getSession());
                     String cwd = event.getSession().getUserProperties().getProperty("lithe.run.workingDirectory");
                     if (cwd != null) {
                         if (!"spring-boot.maven".equals(framework.provider) || execution.getMojoDescriptor().getParameters().stream()
@@ -78,15 +80,25 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
     }
 
     /** Only Maven's resolved Mojo receives framework switches; the host supplies a port. */
-    static void configureDebug(MojoExecution execution, FrameworkLaunch framework, String port) throws Exception {
+    static void configureDebug(MojoExecution execution, FrameworkLaunch framework, String port, MavenSession session) throws Exception {
         int number = Integer.parseInt(port);
         if (number < 1 || number > 65535) throw new IllegalArgumentException("Invalid JVM debug port.");
         Parameter parameter = parameter(execution, framework.runtimeProperty);
+        PluginParameterExpressionEvaluator evaluator = new PluginParameterExpressionEvaluator(session, execution);
         Xpp3Dom configured = execution.getConfiguration().getChild(parameter.getName());
         List<String> values = new ArrayList<>();
         if (configured != null) {
-            if (configured.getValue() != null) values.addAll(Arrays.asList(CommandLineUtils.translateCommandline(configured.getValue())));
-            for (Xpp3Dom child : configured.getChildren()) if (child.getValue() != null) values.add(child.getValue());
+            Object value = evaluator.evaluate(configured.getValue());
+            if (value == null) value = evaluator.evaluate(configured.getAttribute("default-value"));
+            if (value != null) values.addAll(Arrays.asList(CommandLineUtils.translateCommandline(value.toString())));
+            for (Xpp3Dom child : configured.getChildren()) {
+                Object argument = evaluator.evaluate(child.getValue());
+                if (argument != null) values.add(argument.toString());
+            }
+        } else {
+            Object value = evaluator.evaluate(parameter.getExpression());
+            if (value == null) value = evaluator.evaluate(parameter.getDefaultValue());
+            if (value != null) values.addAll(Arrays.asList(CommandLineUtils.translateCommandline(value.toString())));
         }
         if (values.stream().anyMatch(value -> value.startsWith("-agentlib:jdwp") || value.startsWith("-Xrunjdwp"))) {
             throw new IllegalArgumentException("Remove the existing JDWP agent before starting an IDE-owned debug session.");
@@ -118,7 +130,10 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
 
     private static Parameter parameter(MojoExecution execution, String property) {
         for (Parameter parameter : execution.getMojoDescriptor().getParameters()) {
-            if (("${" + property + "}").equals(parameter.getExpression())) return parameter;
+            // Plugin tools retain @Parameter(defaultValue="${...}") separately
+            // from @Parameter(property="..."). Both are Maven-owned bindings.
+            String binding = "${" + property + "}";
+            if (binding.equals(parameter.getExpression()) || binding.equals(parameter.getDefaultValue())) return parameter;
         }
         throw new IllegalArgumentException("The framework has no parameter for " + property);
     }

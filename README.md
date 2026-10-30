@@ -302,3 +302,15 @@ Wrapper 元数据 `maven.wrapper` / `maven.minimumVersion` 来自所选 reactor 
 仍经类型化 Build 选项传递，不接受额外 CLI 覆盖制造第二套配置。属性和环境也
 参与准备时的有效模型读取。开发组合可用 `scripts/package-development.mjs`
 及 `scripts/test-native-core.mjs` 验证；正式 SDK 锁定和发行条件保持不变。
+
+开发协议 11 的 JVM 调试由宿主选择本机端口，后端按当前 Mojo 描述符设置回环监听和
+启动前暂停。参数绑定同时识别 Maven 的 `property` 与 `defaultValue` 表达式，例如
+Quarkus 的 `jvm.args` 属于后者。Spring Boot 保留已有 JVM 参数，Quarkus/Micronaut
+使用框架自带的调试开关；遇到重复 JDWP 或不兼容描述符明确拒绝。
+
+`scripts/test-framework-debug.mjs` 用固定的 Quarkus 3.15.5、Micronaut Maven Plugin
+4.7.2 和真实 reactor 验证暂停、标准 JDI 连接/恢复、参数、环境及兄弟模块依赖。
+此集成使用 Java 17+ 和 Maven 3.9+，不改变 Provider 自身的 Java 8 /
+Maven 3.6.3 支持声明。用 `LITHE_TEST_PACKAGE`、`LITHE_CORE_LIBRARY` 指向显式开发组合，
+`LITHE_TEST_JAVA` 与 `LITHE_TEST_MAVEN` 提供绝对工具路径；输出及逐项报告写入
+`LITHE_REPORT_DIR`，进程退出前清理全部所持 JVM。此测试不代替宿主 Debug UI 验收。
