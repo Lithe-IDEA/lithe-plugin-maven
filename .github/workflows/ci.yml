@@ -181,6 +181,19 @@ jobs:
           export LITHE_TEST_MAVEN="${MVN:-$(command -v mvn)}"
           node scripts/test-configuration.mjs
           node scripts/test-native-core.mjs
+      - uses: oven-sh/setup-bun@v2
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        with:
+          bun-version-file: .artifacts/core-source/windows/tauri/package.json
+      - name: Verify the Windows workflow with the real Provider and selected Core
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+        run: |
+          export LITHE_HOST_SOURCE="$GITHUB_WORKSPACE/.artifacts/core-source"
+          export LITHE_CORE_LIBRARY="$LITHE_HOST_SOURCE/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="$(command -v mvn)"
+          bun scripts/test-windows-workspace.mjs
       - name: Verify Quarkus and Micronaut suspended JVMs with standard JDI
         if: inputs.core-revision != '' && matrix.maven == 'runner'
         env:

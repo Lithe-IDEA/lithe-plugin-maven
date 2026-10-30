@@ -314,3 +314,11 @@ Quarkus 的 `jvm.args` 属于后者。Spring Boot 保留已有 JVM 参数，Quar
 Maven 3.6.3 支持声明。用 `LITHE_TEST_PACKAGE`、`LITHE_CORE_LIBRARY` 指向显式开发组合，
 `LITHE_TEST_JAVA` 与 `LITHE_TEST_MAVEN` 提供绝对工具路径；输出及逐项报告写入
 `LITHE_REPORT_DIR`，进程退出前清理全部所持 JVM。此测试不代替宿主 Debug UI 验收。
+
+`bun scripts/test-windows-workspace.mjs` 加载 `LITHE_HOST_SOURCE` 指定提交的 Windows
+TypeScript 工作区编排，连接真实 Provider 和 `LITHE_CORE_LIBRARY` 指定的 Core。
+它覆盖 reactor 模型、成功测试、逐工程依赖、失败报告和退出清理，并确认包字节不变；
+工具路径由 `LITHE_TEST_JAVA`、`LITHE_TEST_MAVEN` 明确提供。此 lane 可在 macOS/Linux
+运行，不需要安装宿主前端依赖，也不修改正式 SDK 锁定。它不代替 Windows 原生工具发现、
+Job Object 进程清理、Build UI、配置和 Run 消费者迁移；固定提交的开发 CI 在 runner
+Maven 组合执行该测试。
