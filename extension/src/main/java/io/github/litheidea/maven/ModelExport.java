@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.lifecycle.internal.LifecycleExecutionPlanCalculator;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.model.PluginExecution;
 import org.apache.maven.model.Profile;
@@ -40,12 +41,14 @@ final class ModelExport {
 
     private final MavenSession session;
     private final MavenPluginManager pluginManager;
+    private final LifecycleExecutionPlanCalculator executionPlans;
     private final PluginVersionResolver versionResolver;
     /** Goals by plugin coordinates, so each descriptor is read once per run. */
     private final Map<String, Goals> goalsByPlugin = new LinkedHashMap<>();
 
-    ModelExport(MavenSession session, MavenPluginManager pluginManager, PluginVersionResolver versionResolver) {
+    ModelExport(MavenSession session, MavenPluginManager pluginManager, PluginVersionResolver versionResolver, LifecycleExecutionPlanCalculator executionPlans) {
         this.session = session;
+        this.executionPlans = executionPlans;
         this.pluginManager = pluginManager;
         this.versionResolver = versionResolver;
     }
@@ -74,6 +77,8 @@ final class ModelExport {
             properties.put("version", project.getVersion());
             properties.put("packaging", project.getPackaging());
             properties.put("run.modelVersion", "1");
+            String minimumJava = CompilerRequirements.minimumJava(session, project, executionPlans);
+            if (minimumJava != null) properties.put("java.minimumVersion", minimumJava);
             String provider = runProvider(project);
             if (provider != null) properties.put("run.provider", provider);
             entry.put("properties", properties);

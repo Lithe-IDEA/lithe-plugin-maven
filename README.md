@@ -279,3 +279,7 @@ Quarkus 或 Micronaut 插件的非聚合工程还发布 `run.provider`。识别�
 `getBuildPlugins()`，包含生效 Profile 和继承，只有 pluginManagement 时不会误报。
 宿主依据这些事实生成兼容的服务配置，不再解析 POM 判断框架；框架的既有启动规划
 仍在迁移中，不能把这个模型元数据等同于新的 Provider 服务启动接口。
+
+`java.minimumVersion` 来自 Maven 的实际编译执行计划和参数解析器，涵盖 Profile、
+继承、测试编译和自定义 compiler execution；只计算不执行。无法解析时记录诊断并
+保持未知，宿主不得回退到 POM 正则；插件仍以 Maven 3.6.3 API 和 Java 8 构建。

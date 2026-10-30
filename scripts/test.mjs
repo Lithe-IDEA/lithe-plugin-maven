@@ -97,6 +97,8 @@ async function test(signal) {
         artifactId: "app",
         version: "1.0.0-SNAPSHOT",
         packaging: "jar",
+        "run.modelVersion": "1",
+        "java.minimumVersion": "8",
       });
     });
 

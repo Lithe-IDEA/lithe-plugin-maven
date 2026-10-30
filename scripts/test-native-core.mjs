@@ -56,6 +56,48 @@ await withInterrupts(async (signal) => {
       assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
       assert.ok(model.contentRoots.some(content => content.path === 'nested/core/src/main/java'));
     });
+    await report.step('Maven configured compiler executions own Java requirements across profiles and modules', async () => {
+      const pom = join(workspace, root, 'pom.xml'), modulePom = join(workspace, root, 'core/pom.xml');
+      const original = readFileSync(pom, 'utf8'), originalModule = readFileSync(modulePom, 'utf8');
+      const version = project => project.properties['java.minimumVersion'];
+      try {
+        const read = async profiles => build('build.decodeModel', { workspaceRoot: workspace, root,
+          result: await send(build('build.modelPlan', planned({ options: { profiles, offline: true } })).plan, 'compiler-model') }).model;
+        assert.equal(version(model.projects.find(project => project.name === 'core')), '8');
+        writeFileSync(pom, original.replace('</profiles>', `<profile><id>compiler-floor</id><properties>
+          <maven.compiler.release>17</maven.compiler.release><maven.compiler.testRelease>21</maven.compiler.testRelease>
+          </properties></profile></profiles>`));
+        let current = await read(['compiler-floor']);
+        assert.equal(version(current.projects.find(project => project.name === 'core')), '21', 'test release is part of the effective compiler requirement');
+        assert.equal(version(current.projects.find(project => project.name === 'app')), '21');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>11</release></configuration><executions><execution><id>extra-compile</id>
+          <phase>compile</phase><goals><goal>compile</goal></goals><configuration><release>23</release></configuration>
+          </execution></executions></plugin></plugins></build></project>`));
+        current = await read(['compiler-floor']);
+        assert.equal(version(current.projects.find(project => project.name === 'core')), '23', 'custom execution configuration is interpreted by Maven');
+        assert.equal(version(current.projects.find(project => project.name === 'app')), '21', 'module override does not leak');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>\${unresolved.compiler.release}</release></configuration>
+          </plugin></plugins></build></project>`));
+        const absent = await read(['compiler-floor']);
+        assert.equal(version(absent.projects.find(project => project.name === 'core')), '21', 'Maven treats an absent expression as unset and retains the configured test release');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>unsupported-language</release></configuration>
+          </plugin></plugins></build></project>`));
+        const unknown = await read(['compiler-floor']);
+        assert.equal(version(unknown.projects.find(project => project.name === 'core')), undefined, 'an unsupported configured language stays unknown rather than guessing from the parent POM');
+
+        writeFileSync(pom, '<broken><maven.compiler.release>99</maven.compiler.release>');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+            minimumJavaVersion: version(project), contentRoots: [] })) }, null);
+        assert.equal(generated.toolchainRequirements.toolchains['project-jdk'].minimumVersion, '23');
+      } finally { writeFileSync(pom, original); writeFileSync(modulePom, originalModule); }
+    });
     await report.step('effective Profile and inherited plugins own framework Run generation without host POM parsing', async () => {
       const pom = join(workspace, root, 'pom.xml');
       const original = readFileSync(pom, 'utf8');

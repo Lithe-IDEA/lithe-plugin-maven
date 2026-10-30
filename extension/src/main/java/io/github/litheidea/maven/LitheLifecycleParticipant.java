@@ -11,6 +11,7 @@ import javax.inject.Singleton;
 import org.apache.maven.AbstractMavenLifecycleParticipant;
 import org.apache.maven.MavenExecutionException;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.lifecycle.internal.LifecycleExecutionPlanCalculator;
 import org.apache.maven.plugin.MavenPluginManager;
 import org.apache.maven.plugin.version.PluginVersionResolver;
 import org.apache.maven.project.ProjectDependenciesResolver;
@@ -34,6 +35,7 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     static final String DEPENDENCIES_PROJECT = "lithe.dependenciesProject";
 
     private final MavenPluginManager pluginManager;
+    private final LifecycleExecutionPlanCalculator executionPlans;
     private final PluginVersionResolver versionResolver;
     private final ProjectDependenciesResolver dependenciesResolver;
     private final NativeSettingsEvents settingsEvents;
@@ -43,8 +45,10 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
             MavenPluginManager pluginManager,
             PluginVersionResolver versionResolver,
             ProjectDependenciesResolver dependenciesResolver,
-            NativeSettingsEvents settingsEvents) {
+            NativeSettingsEvents settingsEvents,
+            LifecycleExecutionPlanCalculator executionPlans) {
         this.pluginManager = pluginManager;
+        this.executionPlans = executionPlans;
         this.versionResolver = versionResolver;
         this.dependenciesResolver = dependenciesResolver;
         this.settingsEvents = settingsEvents;
@@ -69,7 +73,7 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     public void afterProjectsRead(MavenSession session) throws MavenExecutionException {
         String modelOutput = property(session, MODEL_OUTPUT);
         if (modelOutput != null) {
-            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver).document()));
+            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver, executionPlans).document()));
         }
         String dependenciesOutput = property(session, DEPENDENCIES_OUTPUT);
         if (dependenciesOutput != null) {
