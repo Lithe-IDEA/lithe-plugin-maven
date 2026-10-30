@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 
 /**
  * Lithe's build provider for Maven. It answers {@code lithe/build/model} and
@@ -63,6 +64,20 @@ public final class MavenBackend {
         backend.onDependencies(this::dependencies);
         backend.onExecute((params, context) -> execution(params, context, false));
         backend.onTest((params, context) -> execution(params, context, true));
+        backend.onPrepareRun((params, context) -> {
+            Map<String, Object> request = new LinkedHashMap<>(params);
+            Map<String, Object> environment = new LinkedHashMap<>();
+            if (params.get("environment") instanceof Map) environment.putAll(Json.object(params.get("environment")));
+            environment.putAll(Json.object(Json.object(params.get("launchOptions")).get("environment")));
+            request.put("environment", environment);
+            Inputs selected = inputs(request);
+            List<String> arguments = new java.util.ArrayList<>(selected.optionArguments);
+            arguments.addAll(MavenRunPreparation.modelArguments(request));
+            MavenRuns.Loaded loaded = runs.load(new Inputs(selected.root, selected.maven, arguments, selected.environment,
+                    selected.hostEnvironment, selected.extensionJar), Boolean.TRUE.equals(request.get("refresh")), context.cancellation());
+            context.throwIfCancelled();
+            return MavenRunPreparation.prepare(request, root(request), workspaceRoot, loaded, extensionJar());
+        });
         backend.listen();
     }
 

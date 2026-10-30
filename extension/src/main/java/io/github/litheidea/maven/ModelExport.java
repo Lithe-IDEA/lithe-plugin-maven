@@ -57,6 +57,7 @@ final class ModelExport {
         List<Object> projects = new ArrayList<>();
         List<Object> tasks = new ArrayList<>();
         List<Object> contentRoots = new ArrayList<>();
+        List<Object> targets = new ArrayList<>();
         Map<String, File> aggregators = aggregators();
         Map<String, Object> wrapper = new LinkedHashMap<>();
         WrapperRequirements.add(session, wrapper);
@@ -82,8 +83,18 @@ final class ModelExport {
             properties.putAll(wrapper);
             String minimumJava = CompilerRequirements.minimumJava(session, project, executionPlans);
             if (minimumJava != null) properties.put("java.minimumVersion", minimumJava);
-            String provider = runProvider(project);
-            if (provider != null) properties.put("run.provider", provider);
+            FrameworkLaunch framework = FrameworkLaunch.find(project);
+            if (framework != null) {
+                properties.put("run.provider", framework.provider);
+                properties.put("run.goal", goals(project, framework.plugin).coordinates + ":" + framework.goal);
+                properties.put("run.runtimeArgumentsProperty", framework.runtimeProperty);
+                properties.put("run.argumentsProperty", framework.argumentsProperty);
+                if (framework.entrypointProperty != null) properties.put("run.entrypointProperty", framework.entrypointProperty);
+                properties.put("run.preparationVersion", "1");
+                if ("spring-boot.maven".equals(framework.provider)) properties.put("run.workingDirectoryParameter", "workingDirectory");
+                addTarget(targets, path, framework.provider, "maven-service", properties);
+            }
+            addTarget(targets, path, "maven.module", "maven-module", properties);
             entry.put("properties", properties);
             projects.add(entry);
             if (!"pom".equals(project.getPackaging())) {
@@ -98,6 +109,7 @@ final class ModelExport {
         document.put("version", 1);
         document.put("projects", projects);
         document.put("tasks", tasks);
+        document.put("targets", targets);
         document.put("contentRoots", contentRoots);
         document.put("optionValues", optionValues);
         return document;
@@ -127,21 +139,11 @@ final class ModelExport {
      * Plugin management alone does not apply a plugin. Coordinate precedence
      * preserves the host's existing service identity if several are applied.
      */
-    private static String runProvider(MavenProject project) {
-        if ("pom".equals(project.getPackaging())) return null;
-        String[][] providers = {
-            {"org.springframework.boot", "spring-boot-maven-plugin", "spring-boot.maven"},
-            {"io.quarkus", "quarkus-maven-plugin", "quarkus.maven"},
-            {"io.quarkus.platform", "quarkus-maven-plugin", "quarkus.maven"},
-            {"io.micronaut.build", "micronaut-maven-plugin", "micronaut.maven"},
-            {"io.micronaut.maven", "micronaut-maven-plugin", "micronaut.maven"}
-        };
-        for (String[] provider : providers) {
-            for (Plugin plugin : project.getBuildPlugins()) {
-                if (provider[0].equals(plugin.getGroupId()) && provider[1].equals(plugin.getArtifactId())) return provider[2];
-            }
-        }
-        return null;
+    private static void addTarget(List<Object> targets, String project, String name, String tag, Map<String, Object> properties) {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("project", project); target.put("path", project); target.put("name", name);
+        target.put("tags", Collections.singletonList(tag)); target.put("properties", new LinkedHashMap<>(properties));
+        targets.add(target);
     }
 
     private void addContentRoots(MavenProject project, String owner, List<Object> roots) {

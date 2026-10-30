@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The production plugin, current Core C ABI, and a real Maven reactor in one workflow.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,7 +9,7 @@ import { BackendClient, bounded } from './backend-client.mjs';
 import { coreCommand } from './core-client.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
 import { createReport } from './report.mjs';
-import { mavenTimeout, withInterrupts } from './process.mjs';
+import { mavenTimeout, withInterrupts, runCommand } from './process.mjs';
 
 const id = 'io.github.lithe-idea.maven-build';
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve('dist/package', id));
@@ -45,7 +45,7 @@ await withInterrupts(async (signal) => {
       state: join(scratch, 'state'), timeoutMs: mavenTimeout() });
     await report.step('Core admits the new Maven capability and produces only Provider plans', async () => {
       coreCommand('plugins.declarative.validate', { manifest });
-      assert.equal((await client.initialize(workspace, [9])).capabilities.experimental.litheBuild.version, 9);
+      assert.equal((await client.initialize(workspace, [10])).capabilities.experimental.litheBuild.version, 10);
       for (const task of manifest.buildSystems[0].tasks) { assert.equal(task.source, 'provider'); assert.deepEqual(task.arguments, []); }
       assert.equal(manifest.buildSystems[0].test.source, 'provider');
     });
@@ -346,11 +346,76 @@ await withInterrupts(async (signal) => {
         writeFileSync(pom, original);
       }
     });
+    await report.step('current Maven framework target launches only its module with reactor classes, exact argv and application cwd', async () => {
+      const directory = join(workspace, 'framework reactor');
+      const cwd = join(workspace, 'framework cwd');
+      mkdirSync(cwd);
+      cpSync(resolve('test/fixtures/reactor'), directory, { recursive: true });
+      const version = 'run-' + process.pid + '-' + Date.now();
+      for (const module of ['', 'app', 'core']) {
+        const pom = join(directory, module, 'pom.xml');
+        writeFileSync(pom, readFileSync(pom, 'utf8').replaceAll('1.0.0-SNAPSHOT', version));
+      }
+      const appPom = join(directory, 'app/pom.xml');
+      const original = readFileSync(appPom, 'utf8');
+      writeFileSync(appPom, original.replace('</project>', `<build><plugins><plugin><groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId><version>2.2.2.RELEASE</version></plugin></plugins></build></project>`));
+      writeFileSync(join(directory, 'app/src/main/java/demo/app/Main.java'), `package demo.app;
+        import demo.core.Greeter;
+        public final class Main { public static void main(String[] args) throws Exception {
+          System.out.println(new Greeter().greet(System.getenv("LITHE_RUN_VALUE")));
+          System.out.println("PROP="+System.getProperty("lithe.message"));
+          System.out.println("CWD="+new java.io.File(".").getCanonicalPath());
+          for (String arg : args) System.out.println("ARG="+java.util.Base64.getEncoder().encodeToString(arg.getBytes("UTF-8")));
+        } }`);
+      const selectedRoot = 'framework reactor';
+      const readModel = async () => build('build.decodeModel', { workspaceRoot: workspace, root: selectedRoot,
+        result: await send(build('build.modelPlan', planned({ root: selectedRoot })).plan, 'framework-launch-model') }).model;
+      const current = await readModel();
+      const app = current.projects.find(value => value.name === 'app');
+      const target = current.targets.find(value => value.projectID === app.id && value.name === 'spring-boot.maven');
+      assert.ok(target, 'the effective plugin publishes a typed service target');
+      const launchOptions = { execution: 'service', runtimeArguments: ['-Dlithe.message=hello world'],
+        arguments: ['a b', '雪', 'C:\\literal', 'comma,value', 'double"quote', "single'quote"],
+        environment: { LITHE_RUN_VALUE: 'Provider' }, workingDirectory: 'framework cwd', entrypoint: 'demo.app.Main' };
+      const request = extra => planned({ root: selectedRoot, workspaceRoot: workspace, run: 'framework',
+        project: { name: app.name, path: app.path }, target: { name: target.name, path: target.path, tags: target.tags }, launchOptions, ...extra });
+      const prepared = await send(build('build.prepareRunPlan', request({})).plan, 'framework-launch');
+      const launch = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions, result: prepared }).launch;
+      assert.deepEqual(launch.executable, { kind: 'toolchain', value: 'project-maven' });
+      assert.equal(launch.workingDirectory, 'framework cwd');
+      const transcript = join(scratch, 'framework-launch.log');
+      const descriptor = openSync(transcript, 'w');
+      try {
+        await runCommand(maven, launch.arguments, { cwd, env: { ...process.env, ...launch.environment },
+          stdio: ['ignore', descriptor, descriptor], signal, timeoutMs: mavenTimeout() });
+      } finally { closeSync(descriptor); }
+      const output = readFileSync(transcript, 'utf8');
+      assert.ok(output.includes('Hello, Provider'), output);
+      assert.ok(output.includes('PROP=hello world'), output);
+      assert.ok(output.includes('CWD=' + cwd), output);
+      for (const argument of launchOptions.arguments) assert.ok(output.includes('ARG=' + Buffer.from(argument).toString('base64')), output);
+      assert.ok(!output.includes('spring-boot-maven-plugin:2.2.2.RELEASE:run (default-cli) on project reactor'), output);
+      await assert.rejects(send(build('build.prepareRunPlan', request({ launchOptions: { ...launchOptions, arguments: [''] } })).plan, 'framework-empty'), /preserve empty/);
+      const moduleTarget = current.targets.find(value => value.projectID === app.id && value.name === 'maven.module');
+      const moduleOptions = { execution: 'task', runtimeArguments: [], arguments: ['validate', '-Dcustom.value=two words'], environment: {} };
+      const moduleRequest = request({ run: 'module', target: { name: moduleTarget.name, path: moduleTarget.path, tags: moduleTarget.tags }, launchOptions: moduleOptions });
+      const modulePlan = await send(build('build.prepareRunPlan', moduleRequest).plan, 'module-prepare');
+      assert.equal(modulePlan.arguments.at(-1), '-Dcustom.value=two words');
+      assert.equal(modulePlan.arguments.at(-2), 'validate');
+      for (const argument of ['--file=../outside.xml', '-Pother', '-s', '-Dmaven.repo.local=/other', '-Dlithe.run.goal=other']) {
+        await assert.rejects(send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: { ...moduleOptions, arguments: ['validate', argument] } }).plan,
+          'module-selection-override'), /build options/);
+      }
+      writeFileSync(appPom, original);
+      await assert.rejects(send(build('build.prepareRunPlan', request({})).plan, 'removed-framework'), /absent from the current/);
+    });
     await report.step('publish the same normalized Maven facts and effective options to a declared consumer', () => {
       const consumer = JSON.parse(JSON.stringify(manifest));
       consumer.id = 'org.example.maven-input-consumer';
       consumer.requires.buildProviders = 6;
       delete consumer.buildSystems[0].modelSharing;
+      delete consumer.buildSystems[0].run;
       delete consumer.buildSystems[0].configuration;
       delete consumer.buildSystems[0].test.results;
       delete consumer.buildSystems[0].test.selectorKinds;

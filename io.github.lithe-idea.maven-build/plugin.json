@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 9, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
+  "requires": { "buildProviders": 10, "buildModelInputs": 1, "buildSystems": 3, "executableResolution": 2, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -30,6 +30,30 @@
         "version": { "arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)" },
         "minimumVersion": "3.6.3"
       },
+      "run": [
+        {
+          "id": "framework",
+          "source": "provider",
+          "name": "Run Maven service",
+          "execution": "service",
+          "fromTargets": {
+            "tags": [
+              "maven-service"
+            ]
+          }
+        },
+        {
+          "id": "module",
+          "source": "provider",
+          "name": "Run Maven goals",
+          "execution": "task",
+          "fromTargets": {
+            "tags": [
+              "maven-module"
+            ]
+          }
+        }
+      ],
       "options": [
         {
           "id": "profiles",

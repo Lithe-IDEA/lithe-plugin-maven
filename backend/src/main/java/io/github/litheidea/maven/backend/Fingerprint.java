@@ -39,7 +39,7 @@ import java.util.TreeMap;
  */
 final class Fingerprint {
     /** Bumped when the inputs below change meaning. */
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
     private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
     private static final int MAX_DEPTH = 24;
     private static final int MAX_ENTRIES = 50_000;

@@ -120,7 +120,7 @@ final class MavenExecution {
         return result;
     }
 
-    private static Path selectedProject(Object selected, Path root, Path workspace, MavenRuns.Loaded loaded) throws IOException {
+    static Path selectedProject(Object selected, Path root, Path workspace, MavenRuns.Loaded loaded) throws IOException {
         if (selected == null) return null;
         if (!(selected instanceof Map)) throw invalid("Expected a Maven project selector.");
         Map<String, Object> selection = Json.object(selected);

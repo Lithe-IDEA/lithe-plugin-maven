@@ -288,3 +288,17 @@ Wrapper 元数据 `maven.wrapper` / `maven.minimumVersion` 来自所选 reactor 
 脚本和 properties。读取遵循 Java Properties 的注释与转义，文件大小有硬上限；
 不执行 Wrapper，也不导出完整分发 URL。未知发行文件名保持未知，脚本新增、替换
 或删除均撤销后端快照，宿主同步观察这些文件；多个 reactor 不共用全局 Wrapper。
+
+
+开发协议 10 的框架和模块运行使用 `lithe/build/prepareRun`，目标来自当前 Maven
+模型，应用参数、JVM 参数、环境、入口和显式 cwd 分别传递。插件返回 portable
+启动计划，由宿主既有 Run 会话启动和停止进程。Spring Boot、Quarkus、Micronaut
+的目标选择来自生效的 build plugins；仅存在于 pluginManagement 的插件不会成为服务。
+框架启动保留同 reactor 的 workspace reader：先构建依赖，再仅在所选工程执行
+实际 Mojo，不把服务目标交给父工程。参数按当前 Mojo 描述符的数组/字符串类型
+设置，无法精确保留（例如不支持的空参数或 cwd）时明确拒绝。
+
+模块任务的用户输入是目标和普通 `-D` 属性；Profiles、settings、仓库、工程选择
+仍经类型化 Build 选项传递，不接受额外 CLI 覆盖制造第二套配置。属性和环境也
+参与准备时的有效模型读取。开发组合可用 `scripts/package-development.mjs`
+及 `scripts/test-native-core.mjs` 验证；正式 SDK 锁定和发行条件保持不变。

@@ -8,7 +8,7 @@ export function verifyExtension(jar) {
     { encoding: 'utf8', timeout: 5000, maxBuffer: 65536 });
   assert.equal(result.status, 0, result.error?.message ?? result.stderr);
   const components = new Set(result.stdout.trim().split(/\r?\n/));
-  for (const name of ['LitheLifecycleParticipant', 'NativeSettingsEvents', 'ReportCaptureEvents']) {
+  for (const name of ['LitheLifecycleParticipant', 'NativeSettingsEvents', 'ReportCaptureEvents', 'RunExecutionEvents']) {
     assert.ok(components.has('io.github.litheidea.maven.' + name), `The clean extension package omits ${name}`);
   }
 }
