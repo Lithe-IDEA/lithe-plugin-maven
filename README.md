@@ -310,6 +310,11 @@ Quarkus 的 `jvm.args` 属于后者。Spring Boot 保留已有 JVM 参数，Quar
 
 `scripts/test-framework-debug.mjs` 用固定的 Quarkus 3.15.5、Micronaut Maven Plugin
 4.7.2 和真实 reactor 验证暂停、标准 JDI 连接/恢复、参数、环境及兄弟模块依赖。
+Micronaut 夹具固定 Platform 4.7.6（Core/注解处理器 4.7.14），使用真实编译期依赖注入、
+Netty HTTP 控制器和 JSON 支持；JDI 恢复后通过回环 HTTP 请求验证注入服务读取未安装的
+reactor 兄弟模块，不再只用普通 main 作为 Micronaut 应用证据。应用异常会立即报告，
+HTTP 请求有独立期限。依据为 [Micronaut IoC](https://docs.micronaut.io/4.7.14/guide/#ioc)
+与[固定 Platform BOM](https://repo.maven.apache.org/maven2/io/micronaut/platform/micronaut-platform/4.7.6/micronaut-platform-4.7.6.pom)。
 此集成使用 Java 17+ 和 Maven 3.9+，不改变 Provider 自身的 Java 8 /
 Maven 3.6.3 支持声明。用 `LITHE_TEST_PACKAGE`、`LITHE_CORE_LIBRARY` 指向显式开发组合，
 `LITHE_TEST_JAVA` 与 `LITHE_TEST_MAVEN` 提供绝对工具路径；输出及逐项报告写入
@@ -318,6 +323,8 @@ Maven 3.6.3 支持声明。用 `LITHE_TEST_PACKAGE`、`LITHE_CORE_LIBRARY` 指�
 `bun scripts/test-windows-workspace.mjs` 加载 `LITHE_HOST_SOURCE` 指定提交的 Windows
 TypeScript 工作区编排，连接真实 Provider 和 `LITHE_CORE_LIBRARY` 指定的 Core。
 它覆盖 reactor 模型、成功测试、逐工程依赖、失败报告和退出清理，并确认包字节不变；
+原生配置读取还验证损坏 POM 不妨碍读取、配置来源字节不变、秘密不导出、仓库和构建目录
+不创建，探针临时状态会清理。
 工具路径由 `LITHE_TEST_JAVA`、`LITHE_TEST_MAVEN` 明确提供。此 lane 可在 macOS/Linux
 运行，不需要安装宿主前端依赖，也不修改正式 SDK 锁定。它不代替 Windows 原生工具发现、
 Job Object 进程清理、Build UI、配置和 Run 消费者迁移；固定提交的开发 CI 在 runner

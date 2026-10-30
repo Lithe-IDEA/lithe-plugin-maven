@@ -36,8 +36,17 @@ const frameworkCases = [
   { name: 'micronaut', provider: 'micronaut.maven', version: '4.7.2', group: 'io.micronaut.maven', artifact: 'micronaut-maven-plugin',
     // The plugin declares this parameter required even when test resources are
     // disabled. Use its own 4.7.2 parent POM's version; no Docker server is started.
-    dependencies: '', configuration: '<mainClass>demo.app.Main</mainClass><jvmArguments>-Dlithe.pom=preserved</jvmArguments><testResourcesVersion>2.6.2</testResourcesVersion><testResourcesEnabled>false</testResourcesEnabled>',
-    imports: '', declaration: 'public class Main { public static void main(String[] args) throws Exception {', end: '} }' },
+    // Platform 4.7.6 pins Core/processor 4.7.14. The fixture runs real DI and
+    // Netty HTTP, rather than merely launching a plain main through the Mojo.
+    management: '<dependencyManagement><dependencies><dependency><groupId>io.micronaut.platform</groupId><artifactId>micronaut-platform</artifactId><version>4.7.6</version><type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement>',
+    dependencies: '<dependency><groupId>io.micronaut</groupId><artifactId>micronaut-runtime</artifactId></dependency><dependency><groupId>io.micronaut</groupId><artifactId>micronaut-http-server-netty</artifactId></dependency><dependency><groupId>io.micronaut</groupId><artifactId>micronaut-jackson-databind</artifactId></dependency>',
+    compiler: '<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><annotationProcessorPaths><path><groupId>io.micronaut</groupId><artifactId>micronaut-inject-java</artifactId><version>4.7.14</version></path></annotationProcessorPaths></configuration></plugin>',
+    configuration: '<mainClass>demo.app.Main</mainClass><jvmArguments>-Dlithe.pom=preserved</jvmArguments><testResourcesVersion>2.6.2</testResourcesVersion><testResourcesEnabled>false</testResourcesEnabled>',
+    imports: 'import io.micronaut.context.ApplicationContext; import io.micronaut.runtime.server.EmbeddedServer;',
+    declaration: 'public class Main { public static void main(String[] args) throws Exception { try (ApplicationContext context = ApplicationContext.run(java.util.Map.of("micronaut.server.host", "127.0.0.1", "micronaut.server.port", -1))) { EmbeddedServer server = context.getBean(EmbeddedServer.class).start();',
+    greeting: 'context.getBean(GreetingService.class).greet()',
+    after: 'System.out.println("MICRONAUT_PORT="+server.getPort()); new java.util.concurrent.CountDownLatch(1).await(45, java.util.concurrent.TimeUnit.SECONDS);',
+    http: true, end: '} } }' },
 ];
 
 async function unusedPort() {
@@ -87,13 +96,26 @@ await withInterrupts(async signal => {
         const pom = join(directory, 'app/pom.xml');
         writeFileSync(pom, readFileSync(pom, 'utf8').replace('</dependencies>', fixture.dependencies + '</dependencies>')
           .replace('</project>', `<build><plugins><plugin><groupId>${fixture.group}</groupId><artifactId>${fixture.artifact}</artifactId>
-            <version>${fixture.version}</version>${fixture.lifecycle ?? ''}<configuration>${fixture.configuration}</configuration></plugin></plugins></build></project>`));
+            <version>${fixture.version}</version>${fixture.lifecycle ?? ''}<configuration>${fixture.configuration}</configuration></plugin>${fixture.compiler ?? ''}</plugins></build></project>`));
+        if (fixture.http) {
+          writeFileSync(join(directory, 'app/src/main/java/demo/app/GreetingService.java'), `package demo.app;
+            @jakarta.inject.Singleton public class GreetingService {
+              public String greet() { return new demo.core.Greeter().greet(System.getenv("LITHE_RUN_VALUE")); }
+            }`);
+          writeFileSync(join(directory, 'app/src/main/java/demo/app/GreetingController.java'), `package demo.app;
+            @io.micronaut.http.annotation.Controller("/lithe") public class GreetingController {
+              private final GreetingService service;
+              public GreetingController(GreetingService service) { this.service = service; }
+              @io.micronaut.http.annotation.Get(produces = "text/plain") public String index() { return service.greet(); }
+            }`);
+        }
         const marker = `FRAMEWORK=${fixture.name}:Hello, Provider`;
         writeFileSync(join(directory, 'app/src/main/java/demo/app/Main.java'), `package demo.app; import demo.core.Greeter; ${fixture.imports}
           ${fixture.declaration}
-          System.out.println("FRAMEWORK=${fixture.name}:"+new Greeter().greet(System.getenv("LITHE_RUN_VALUE")));
+          System.out.println("FRAMEWORK=${fixture.name}:"+${fixture.greeting ?? 'new Greeter().greet(System.getenv("LITHE_RUN_VALUE"))'});
           System.out.println("POMFLAG="+System.getProperty("lithe.pom"));
           for (String arg : args) System.out.println("ARG="+java.util.Base64.getEncoder().encodeToString(arg.getBytes("UTF-8")));
+          ${fixture.after ?? ''}
           ${fixture.end}`);
         const plan = (command, request) => coreCommand(command, { manifest, buildSystemID: 'maven', request });
         const planned = extra => ({ root, options: {}, pluginDirectory: pkg, workspaceStateDirectory: join(scratch, 'state'), tool: { executable: maven }, ...extra });
@@ -109,16 +131,19 @@ await withInterrupts(async signal => {
         const prepared = await send(plan('build.prepareRunPlan', planned({ workspaceRoot: workspace, run: 'framework',
           project: { name: app.name, path: app.path }, target: { name: target.name, path: target.path, tags: target.tags }, launchOptions })).plan);
         const launch = plan('build.decodeRunPreparation', { workspaceRoot: workspace, root, launchOptions, result: prepared }).launch;
-        let output = '', ready, ran;
-        const listening = new Promise(resolve => { ready = resolve; }), application = new Promise(resolve => { ran = resolve; });
+        let output = '', ready, ran, applicationFailed;
+        const listening = new Promise(resolve => { ready = resolve; }), application = new Promise((resolve, reject) => { ran = resolve; applicationFailed = reject; });
+        application.catch(() => {});
         const controller = new AbortController(), abort = () => controller.abort(signal.reason);
         signal.addEventListener('abort', abort, { once: true });
         const running = runCommand(maven, launch.arguments, { cwd: join(workspace, launch.workingDirectory),
           env: { ...process.env, ...launch.environment }, signal: controller.signal, timeoutMs: mavenTimeout(),
           onOutput: chunk => {
             output = (output + chunk).slice(-500000);
+            if (output.includes('Exception in thread "main"')) applicationFailed(new Error('Application main failed: ' + output));
             if (output.includes('Listening for transport dt_socket at address: ' + port)) ready();
             if (output.includes(marker) && output.includes('POMFLAG=preserved')
+              && (!fixture.http || /MICRONAUT_PORT=\d+/.test(output))
               && launchOptions.arguments.every(arg => output.includes('ARG=' + Buffer.from(arg).toString('base64')))) ran();
           } });
         const completed = running.then(() => { throw new Error('Framework exited before acceptance: ' + output); });
@@ -129,6 +154,15 @@ await withInterrupts(async signal => {
           assert.ok(!output.includes(marker), 'application must not execute before JDI attachment');
           await runCommand(java, ['-cp', scratch + (existsSync(tools) ? delimiter + tools : ''), 'ResumeFramework', String(port)], { signal, timeoutMs: 10000 });
           await bounded(Promise.race([application, completed]), `${fixture.name} resumed application`, 30000);
+          if (fixture.http) {
+            const port = Number(/MICRONAUT_PORT=(\d+)/.exec(output)?.[1]);
+            assert.ok(Number.isInteger(port) && port > 0 && port <= 65535);
+            const response = await fetch(`http://127.0.0.1:${port}/lithe`, { signal: AbortSignal.timeout(5000) });
+            assert.equal(response.status, 200);
+            assert.equal(await response.text(), 'Hello, Provider', 'real Micronaut HTTP dispatch uses the injected reactor dependency');
+            assert.ok(existsSync(join(directory, 'app/target/classes/demo/app/$GreetingService$Definition.class')),
+              'the real Micronaut annotation processor generated the bean definition');
+          }
         } catch (error) { throw new Error(`${error.message}\n${output}`, { cause: error }); }
         finally {
           signal.removeEventListener('abort', abort); controller.abort();

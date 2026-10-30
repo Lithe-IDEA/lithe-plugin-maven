@@ -1,7 +1,7 @@
 // The Windows TypeScript workflow, production Maven Provider and current Core.
 // Runs on macOS/Linux; native Windows launch/process acceptance is separate.
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -57,11 +57,35 @@ await withInterrupts(async signal => {
         stop: async () => { await client.close(); },
       },
     });
+    await report.step('Windows reads real native settings before a broken POM without writing sources or creating the repository', async () => {
+      const pom = join(workspacePath, root, 'pom.xml'), original = readFileSync(pom);
+      const mavenConfiguration = join(workspacePath, root, '.mvn/maven.config');
+      const user = join(scratch, 'user settings.xml'), global = join(scratch, 'global.xml'), repository = join(scratch, 'unused-repository');
+      writeFileSync(user, '<settings><servers><server><id>fixture</id><password>fixture-private-value</password></server></servers></settings>');
+      writeFileSync(global, `<settings><localRepository>${repository}</localRepository></settings>`);
+      const before = [readFileSync(user), readFileSync(global)];
+      mkdirSync(join(workspacePath, root, '.mvn'), { recursive: true });
+      writeFileSync(mavenConfiguration, `-gs\n${global}\n`);
+      writeFileSync(pom, '<intentionally broken POM');
+      try {
+        const configuration = await workspace.readConfiguration({ ...instance, options: { settingsFile: user } }).completion;
+        const selected = configuration.sources.find(source => source.id === 'user');
+        const field = selected.fields.find(field => field.id === 'localRepository');
+        assert.equal(field.value, null); assert.equal(field.effectiveValue, repository);
+        assert.equal(configuration.sources.find(source => source.id === 'installation').writable, false);
+        assert.ok(!JSON.stringify(configuration).includes('fixture-private-value'));
+        assert.deepEqual([readFileSync(user), readFileSync(global)], before);
+        assert.equal(existsSync(repository), false);
+        assert.equal(existsSync(join(workspacePath, root, 'target')), false);
+        assert.deepEqual(readdirSync(state).filter(name => name.startsWith('configuration-')), []);
+        assert.equal(workspace.model(instance), undefined);
+      } finally { writeFileSync(pom, original); rmSync(mavenConfiguration); }
+    });
     await report.step('Windows loads the real reactor through Core and the production Provider', async () => {
       model = await workspace.loadModel(instance).completion;
       assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
       assert.ok(model.contentRoots.some(content => content.path === 'nested/core/src/main/java'));
-      assert.deepEqual(requests, ['lithe/build/model']);
+      assert.deepEqual(requests, ['lithe/build/configuration', 'lithe/build/model']);
     });
     await report.step('Windows executes real reactor tests and decodes inline reports', async () => {
       const operation = workspace.executeTask(instance, 'test');
