@@ -56,6 +56,33 @@ await withInterrupts(async (signal) => {
       assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
       assert.ok(model.contentRoots.some(content => content.path === 'nested/core/src/main/java'));
     });
+    await report.step('effective Profile and inherited plugins own framework Run generation without host POM parsing', async () => {
+      const pom = join(workspace, root, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      try {
+        writeFileSync(pom, original.replace('</plugins>', `<plugin>
+          <groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><version>0.0.0-fixture</version>
+          </plugin></plugins>`).replace('</profiles>', `<profile><id>framework</id><build><plugins><plugin>
+          <groupId>io.quarkus.platform</groupId><artifactId>quarkus-maven-plugin</artifactId><version>0.0.0-fixture</version>
+          </plugin></plugins></build></profile></profiles>`));
+        const read = async profiles => build('build.decodeModel', { workspaceRoot: workspace, root,
+          result: await send(build('build.modelPlan', planned({ options: { profiles, offline: true } })).plan, 'framework-model') }).model;
+        const inactive = await read([]);
+        assert.ok(inactive.projects.every(project => project.properties['run.modelVersion'] === '1'));
+        assert.ok(inactive.projects.every(project => project.properties['run.provider'] === undefined), 'plugin management alone is not an applied framework');
+        const active = await read(['framework']);
+        assert.equal(active.projects.find(project => project.name === 'reactor').properties['run.provider'], undefined, 'aggregators are not services');
+        assert.ok(active.projects.filter(project => project.name !== 'reactor').every(project => project.properties['run.provider'] === 'quarkus.maven'), 'Maven applies the inherited active Profile');
+        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+          mavenRunProvider: project.properties['run.provider'], contentRoots: [] }));
+        writeFileSync(pom, '<deliberately-broken-after-Maven-returned-the-model>');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [], diagnostics: [] }, projectOwnership: ownership }, null);
+        assert.deepEqual(generated.generated.configurations.map(item => item.id).sort(), ['quarkus.maven:nested/app', 'quarkus.maven:nested/core']);
+        for (const item of generated.generated.configurations) {
+          assert.equal(item.cwd, root); assert.equal(item.execution, 'service');
+        }
+      } finally { writeFileSync(pom, original); }
+    });
     const project = model.projects.find(project => project.name === 'core');
     await report.step('Core plans a module build, Maven executes it, and the class file exists', async () => {
       compilePlan = build('build.taskPlan', planned({ task: 'compile', project })).plan;

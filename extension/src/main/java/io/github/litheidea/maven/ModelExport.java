@@ -73,6 +73,9 @@ final class ModelExport {
             properties.put("artifactId", project.getArtifactId());
             properties.put("version", project.getVersion());
             properties.put("packaging", project.getPackaging());
+            properties.put("run.modelVersion", "1");
+            String provider = runProvider(project);
+            if (provider != null) properties.put("run.provider", provider);
             entry.put("properties", properties);
             projects.add(entry);
             if (!"pom".equals(project.getPackaging())) {
@@ -110,6 +113,27 @@ final class ModelExport {
             }
         }
         return result;
+    }
+
+    /** Effective build plugins include active profiles and inherited plugins.
+     * Plugin management alone does not apply a plugin. Coordinate precedence
+     * preserves the host's existing service identity if several are applied.
+     */
+    private static String runProvider(MavenProject project) {
+        if ("pom".equals(project.getPackaging())) return null;
+        String[][] providers = {
+            {"org.springframework.boot", "spring-boot-maven-plugin", "spring-boot.maven"},
+            {"io.quarkus", "quarkus-maven-plugin", "quarkus.maven"},
+            {"io.quarkus.platform", "quarkus-maven-plugin", "quarkus.maven"},
+            {"io.micronaut.build", "micronaut-maven-plugin", "micronaut.maven"},
+            {"io.micronaut.maven", "micronaut-maven-plugin", "micronaut.maven"}
+        };
+        for (String[] provider : providers) {
+            for (Plugin plugin : project.getBuildPlugins()) {
+                if (provider[0].equals(plugin.getGroupId()) && provider[1].equals(plugin.getArtifactId())) return provider[2];
+            }
+        }
+        return null;
     }
 
     private void addContentRoots(MavenProject project, String owner, List<Object> roots) {
