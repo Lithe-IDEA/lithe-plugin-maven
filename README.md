@@ -283,3 +283,8 @@ Quarkus 或 Micronaut 插件的非聚合工程还发布 `run.provider`。识别�
 `java.minimumVersion` 来自 Maven 的实际编译执行计划和参数解析器，涵盖 Profile、
 继承、测试编译和自定义 compiler execution；只计算不执行。无法解析时记录诊断并
 保持未知，宿主不得回退到 POM 正则；插件仍以 Maven 3.6.3 API 和 Java 8 构建。
+
+Wrapper 元数据 `maven.wrapper` / `maven.minimumVersion` 来自所选 reactor 的原生
+脚本和 properties。读取遵循 Java Properties 的注释与转义，文件大小有硬上限；
+不执行 Wrapper，也不导出完整分发 URL。未知发行文件名保持未知，脚本新增、替换
+或删除均撤销后端快照，宿主同步观察这些文件；多个 reactor 不共用全局 Wrapper。

@@ -1,6 +1,7 @@
 package io.github.litheidea.maven.backend;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -38,7 +39,8 @@ import java.util.TreeMap;
  */
 final class Fingerprint {
     /** Bumped when the inputs below change meaning. */
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
+    private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
     private static final int MAX_DEPTH = 24;
     private static final int MAX_ENTRIES = 50_000;
     private static final Set<String> SKIPPED = new HashSet<>(Arrays.asList("target", ".git", "node_modules"));
@@ -64,6 +66,8 @@ final class Fingerprint {
         for (String name : Arrays.asList("maven.config", "extensions.xml", "jvm.config", "wrapper/maven-wrapper.properties")) {
             fingerprint.addFile(".mvn/" + name, inputs.root.resolve(".mvn").resolve(name));
         }
+
+        for (String name : Arrays.asList("mvnw", "mvnw.cmd")) fingerprint.addFile(name, inputs.root.resolve(name));
 
         // Native source identities are exported by the selected Maven and
         // checked by Snapshots/NativeSources, not guessed from CLI syntax.
@@ -97,7 +101,7 @@ final class Fingerprint {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
                 if (attributes.isRegularFile() && file.getFileName().toString().equals("pom.xml")) {
-                    poms.put(root.relativize(file).toString(), sha256(Files.readAllBytes(file)));
+                    poms.put(root.relativize(file).toString(), sha256(file));
                 }
                 return count();
             }
@@ -123,7 +127,7 @@ final class Fingerprint {
 
     private void addFile(String label, Path path) throws IOException {
         if (Files.isRegularFile(path)) {
-            add(label, sha256(Files.readAllBytes(path)));
+            add(label, sha256(path));
         } else {
             add(label, null);
         }
@@ -150,9 +154,21 @@ final class Fingerprint {
         return hex(digest.digest());
     }
 
-    private static String sha256(byte[] bytes) {
+    private static String sha256(Path path) throws IOException {
         try {
-            return hex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            MessageDigest fileDigest = MessageDigest.getInstance("SHA-256");
+            if (Files.size(path) > MAX_FILE_BYTES) throw new IOException("Maven fingerprint input exceeds 64 MiB");
+            try (InputStream input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                long total = 0;
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (total > MAX_FILE_BYTES) throw new IOException("Maven fingerprint input exceeds 64 MiB");
+                    fileDigest.update(buffer, 0, count);
+                }
+            }
+            return hex(fileDigest.digest());
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException(error);
         }

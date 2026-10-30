@@ -231,7 +231,7 @@
         ]
       },
       "dependencies": { "source": "provider", "scopes": ["workspace", "project"] },
-      "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", "pom.xml"] },
+      "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", ".mvn/jvm.config", ".mvn/wrapper/maven-wrapper.properties", "mvnw", "mvnw.cmd", "pom.xml"] },
       "layout": { "excluded": ["target"] },
       "languageImport": {
         "kind": "maven",

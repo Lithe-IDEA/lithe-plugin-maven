@@ -45,7 +45,7 @@ final class CompilerRequirements {
             }
             return minimum == 0 ? null : Integer.toString(minimum);
         } catch (Exception error) {
-            // Unavailable plugin descriptors or unresolved expressions leave the
+            // Unavailable plugin descriptors or unsupported evaluated versions leave the
             // requirement unknown. They must never trigger a second POM parser.
             LOG.warn("Lithe could not determine Java compiler requirements for {}: {}", project.getArtifactId(), error.getMessage());
             return null;

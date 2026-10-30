@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The production plugin, current Core C ABI, and a real Maven reactor in one workflow.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -97,6 +97,39 @@ await withInterrupts(async (signal) => {
             minimumJavaVersion: version(project), contentRoots: [] })) }, null);
         assert.equal(generated.toolchainRequirements.toolchains['project-jdk'].minimumVersion, '23');
       } finally { writeFileSync(pom, original); writeFileSync(modulePom, originalModule); }
+    });
+    await report.step('native Wrapper metadata uses Properties semantics and script changes revoke cached facts', async () => {
+      const directory = join(workspace, root), wrapper = join(directory, 'mvnw'), windowsWrapper = join(directory, 'mvnw.cmd');
+      const properties = join(directory, '.mvn/wrapper/maven-wrapper.properties');
+      mkdirSync(join(directory, '.mvn/wrapper'), { recursive: true });
+      const read = async () => build('build.decodeModel', { workspaceRoot: workspace, root,
+        result: await send(build('build.modelPlan', planned({ options: { offline: true } })).plan, 'wrapper-model') }).model;
+      try {
+        writeFileSync(wrapper, '#!/bin/sh\nexit 99\n');
+        writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https\\://example.invalid/apache-maven-3.9.9-bin.zip\n');
+        let current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === 'mvnw'));
+        assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === '3.9.9'), 'native properties ignore comments and unescape the URL');
+        writeFileSync(properties, 'distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\n');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+            mavenMinimumVersion: project.properties['maven.minimumVersion'], mavenWrapper: root + '/' + project.properties['maven.wrapper'], contentRoots: [] })) }, null);
+        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].minimumVersion, '3.9.9');
+        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].wrapper, 'nested/mvnw');
+        writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https://example.invalid/custom.zip\n');
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === undefined), 'unrecognized distribution stays unknown');
+        rmSync(wrapper); writeFileSync(windowsWrapper, '@exit /b 99\n');
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === 'mvnw.cmd'), 'script-only changes invalidate the backend snapshot');
+        rmSync(windowsWrapper);
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === undefined), 'removing the last script revokes the Wrapper fact');
+        writeFileSync(wrapper, ''); truncateSync(wrapper, 64 * 1024 * 1024 + 1);
+        await assert.rejects(read(), 'an oversized script is rejected before an unbounded fingerprint allocation or Maven execution');
+      } finally {
+        rmSync(wrapper, { force: true }); rmSync(windowsWrapper, { force: true }); rmSync(properties, { force: true });
+      }
     });
     await report.step('effective Profile and inherited plugins own framework Run generation without host POM parsing', async () => {
       const pom = join(workspace, root, 'pom.xml');

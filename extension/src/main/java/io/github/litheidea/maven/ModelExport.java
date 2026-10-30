@@ -58,6 +58,8 @@ final class ModelExport {
         List<Object> tasks = new ArrayList<>();
         List<Object> contentRoots = new ArrayList<>();
         Map<String, File> aggregators = aggregators();
+        Map<String, Object> wrapper = new LinkedHashMap<>();
+        WrapperRequirements.add(session, wrapper);
         for (MavenProject project : session.getProjects()) {
             String path = path(project.getBasedir());
             Map<String, Object> entry = new LinkedHashMap<>();
@@ -77,6 +79,7 @@ final class ModelExport {
             properties.put("version", project.getVersion());
             properties.put("packaging", project.getPackaging());
             properties.put("run.modelVersion", "1");
+            properties.putAll(wrapper);
             String minimumJava = CompilerRequirements.minimumJava(session, project, executionPlans);
             if (minimumJava != null) properties.put("java.minimumVersion", minimumJava);
             String provider = runProvider(project);
