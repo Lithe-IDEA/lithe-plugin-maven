@@ -56,6 +56,8 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
                 if (goal.endsWith(":" + execution.getGoal()) && framework.plugin.getArtifactId().equals(execution.getArtifactId())) {
                     configure(execution, framework.runtimeProperty, arguments(event, "runtime"));
                     configure(execution, framework.argumentsProperty, arguments(event, "arguments"));
+                    String debugPort = event.getSession().getUserProperties().getProperty("lithe.run.debugPort");
+                    if (debugPort != null) configureDebug(execution, framework, debugPort);
                     String cwd = event.getSession().getUserProperties().getProperty("lithe.run.workingDirectory");
                     if (cwd != null) {
                         if (!"spring-boot.maven".equals(framework.provider) || execution.getMojoDescriptor().getParameters().stream()
@@ -74,6 +76,52 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
             throw new LifecycleExecutionException("Lithe could not prepare the current Maven framework goal.", null, event.getProject(), error);
         }
     }
+
+    /** Only Maven's resolved Mojo receives framework switches; the host supplies a port. */
+    static void configureDebug(MojoExecution execution, FrameworkLaunch framework, String port) throws Exception {
+        int number = Integer.parseInt(port);
+        if (number < 1 || number > 65535) throw new IllegalArgumentException("Invalid JVM debug port.");
+        Parameter parameter = parameter(execution, framework.runtimeProperty);
+        Xpp3Dom configured = execution.getConfiguration().getChild(parameter.getName());
+        List<String> values = new ArrayList<>();
+        if (configured != null) {
+            if (configured.getValue() != null) values.addAll(Arrays.asList(CommandLineUtils.translateCommandline(configured.getValue())));
+            for (Xpp3Dom child : configured.getChildren()) if (child.getValue() != null) values.add(child.getValue());
+        }
+        if (values.stream().anyMatch(value -> value.startsWith("-agentlib:jdwp") || value.startsWith("-Xrunjdwp"))) {
+            throw new IllegalArgumentException("Remove the existing JDWP agent before starting an IDE-owned debug session.");
+        }
+        if ("spring-boot.maven".equals(framework.provider)) {
+            values.add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:" + number);
+            configure(execution, framework.runtimeProperty, values);
+        } else if ("quarkus.maven".equals(framework.provider)) {
+            scalar(execution, "debug", "java.lang.String", port);
+            scalar(execution, "suspend", "java.lang.String", "y");
+            scalar(execution, "debugHost", "java.lang.String", "127.0.0.1");
+        } else if ("micronaut.maven".equals(framework.provider)) {
+            scalar(execution, "debug", "boolean", "true");
+            scalar(execution, "debugSuspend", "boolean", "true");
+            scalar(execution, "debugPort", "int", port);
+            scalar(execution, "debugHost", "java.lang.String", "127.0.0.1");
+        } else throw new IllegalArgumentException("The current framework cannot prepare JVM debugging.");
+    }
+
+    private static void scalar(MojoExecution execution, String name, String type, String text) {
+        if (execution.getMojoDescriptor().getParameters().stream()
+                .noneMatch(parameter -> name.equals(parameter.getName()) && type.equals(parameter.getType()))) {
+            throw new IllegalArgumentException("The framework has no compatible debug parameter: " + name);
+        }
+        Xpp3Dom value = execution.getConfiguration().getChild(name);
+        if (value == null) { value = new Xpp3Dom(name); execution.getConfiguration().addChild(value); }
+        value.setValue(text);
+    }
+
+    private static Parameter parameter(MojoExecution execution, String property) {
+        for (Parameter parameter : execution.getMojoDescriptor().getParameters()) {
+            if (("${" + property + "}").equals(parameter.getExpression())) return parameter;
+        }
+        throw new IllegalArgumentException("The framework has no parameter for " + property);
+    }
     private static List<String> arguments(ProjectExecutionEvent event, String kind) {
         Properties properties = event.getSession().getUserProperties();
         int count = Integer.parseInt(properties.getProperty("lithe.run." + kind + ".count", "0"));
@@ -90,11 +138,7 @@ public final class RunExecutionEvents implements ProjectExecutionListener {
     /** Maven's descriptor selects string versus collection conversion for each plugin version. */
     private static void configure(MojoExecution execution, String property, List<String> values) throws Exception {
         if (values.isEmpty()) return;
-        Parameter selected = null;
-        for (Parameter parameter : execution.getMojoDescriptor().getParameters()) {
-            if (("${" + property + "}").equals(parameter.getExpression())) selected = parameter;
-        }
-        if (selected == null) throw new IllegalArgumentException("The framework has no parameter for " + property);
+        Parameter selected = parameter(execution, property);
         Xpp3Dom configuration = execution.getConfiguration();
         Xpp3Dom value = configuration.getChild(selected.getName());
         if (value == null) { value = new Xpp3Dom(selected.getName()); configuration.addChild(value); }

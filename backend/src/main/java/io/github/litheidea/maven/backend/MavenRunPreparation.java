@@ -49,6 +49,14 @@ final class MavenRunPreparation {
             if (!"1".equals(properties.get("run.preparationVersion"))) throw invalid("The Maven model cannot prepare this framework run. Refresh or update the plugin.");
             addArguments(arguments, "runtime", runtimeArguments);
             addArguments(arguments, "arguments", programArguments);
+            if (options.containsKey("debug")) {
+                Map<String, Object> debug = Json.object(options.get("debug"));
+                Object port = debug.get("port");
+                if (debug.size() != 2 || !"jvm".equals(debug.get("runtime")) || !(port instanceof Number)
+                        || ((Number) port).doubleValue() != ((Number) port).longValue()
+                        || ((Number) port).longValue() < 1 || ((Number) port).longValue() > 65535) throw invalid("Select a valid JVM debug port.");
+                arguments.add("-Dlithe.run.debugPort=" + ((Number) port).longValue());
+            }
             String entrypoint = Json.string(options, "entrypoint");
             if (entrypoint != null) addProperty(arguments, properties, "run.entrypointProperty", entrypoint);
             if (options.containsKey("workingDirectory")) {
@@ -60,6 +68,7 @@ final class MavenRunPreparation {
             arguments.add("-Dlithe.run.goal=" + properties.get("run.goal"));
             arguments.add("test-compile");
         } else {
+            if (options.containsKey("debug")) throw invalid("Select a framework service to debug; arbitrary Maven goals have no JVM debug target.");
             if (!runtimeArguments.isEmpty() || options.containsKey("entrypoint")) throw invalid("Maven module goals do not accept application runtime or entrypoint options.");
             if (programArguments.isEmpty()) throw invalid("A Maven module run needs one or more goals.");
             modelArguments(params); // The same checked properties were supplied to the model read.

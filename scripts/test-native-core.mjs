@@ -3,8 +3,9 @@
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, delimiter } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { BackendClient, bounded } from './backend-client.mjs';
 import { coreCommand } from './core-client.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
@@ -45,7 +46,7 @@ await withInterrupts(async (signal) => {
       state: join(scratch, 'state'), timeoutMs: mavenTimeout() });
     await report.step('Core admits the new Maven capability and produces only Provider plans', async () => {
       coreCommand('plugins.declarative.validate', { manifest });
-      assert.equal((await client.initialize(workspace, [10])).capabilities.experimental.litheBuild.version, 10);
+      assert.equal((await client.initialize(workspace, [11])).capabilities.experimental.litheBuild.version, 11);
       for (const task of manifest.buildSystems[0].tasks) { assert.equal(task.source, 'provider'); assert.deepEqual(task.arguments, []); }
       assert.equal(manifest.buildSystems[0].test.source, 'provider');
     });
@@ -359,12 +360,14 @@ await withInterrupts(async (signal) => {
       const appPom = join(directory, 'app/pom.xml');
       const original = readFileSync(appPom, 'utf8');
       writeFileSync(appPom, original.replace('</project>', `<build><plugins><plugin><groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId><version>2.2.2.RELEASE</version></plugin></plugins></build></project>`));
+        <artifactId>spring-boot-maven-plugin</artifactId><version>2.2.2.RELEASE</version>
+        <configuration><jvmArguments>-Dlithe.pom=preserved</jvmArguments></configuration></plugin></plugins></build></project>`));
       writeFileSync(join(directory, 'app/src/main/java/demo/app/Main.java'), `package demo.app;
         import demo.core.Greeter;
         public final class Main { public static void main(String[] args) throws Exception {
           System.out.println(new Greeter().greet(System.getenv("LITHE_RUN_VALUE")));
           System.out.println("PROP="+System.getProperty("lithe.message"));
+          System.out.println("POMFLAG="+System.getProperty("lithe.pom"));
           System.out.println("CWD="+new java.io.File(".").getCanonicalPath());
           for (String arg : args) System.out.println("ARG="+java.util.Base64.getEncoder().encodeToString(arg.getBytes("UTF-8")));
         } }`);
@@ -395,6 +398,48 @@ await withInterrupts(async (signal) => {
       assert.ok(output.includes('PROP=hello world'), output);
       assert.ok(output.includes('CWD=' + cwd), output);
       for (const argument of launchOptions.arguments) assert.ok(output.includes('ARG=' + Buffer.from(argument).toString('base64')), output);
+      // The standard JDI connector proves a real suspended JVM is reachable;
+      // no second implementation of JDWP or Maven launch semantics is involved.
+      const allocator = createServer(), allocation = new AbortController();
+      const port = await bounded(new Promise((resolve, reject) => {
+        allocator.once('error', reject);
+        allocator.listen({ port: 0, host: '127.0.0.1', signal: allocation.signal }, () => { const port = allocator.address().port; allocator.close(error => error ? reject(error) : resolve(port)); });
+      }), 'allocate loopback debug port', 5000).finally(() => allocation.abort());
+      const debugOptions = { ...launchOptions, runtimeArguments: [], debug: { runtime: 'jvm', port } };
+      const debugResult = await send(build('build.prepareRunPlan', request({ launchOptions: debugOptions })).plan, 'framework-debug');
+      const debugPlan = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions: debugOptions, result: debugResult }).launch;
+      const helper = join(scratch, 'ResumeJvm.java');
+      writeFileSync(helper, `import com.sun.jdi.*; import com.sun.jdi.connect.*; import java.util.*;
+        public class ResumeJvm { public static void main(String[] args) throws Exception {
+          AttachingConnector connector = Bootstrap.virtualMachineManager().attachingConnectors().stream()
+            .filter(value -> value.name().equals("com.sun.jdi.SocketAttach")).findFirst().get();
+          Map<String, Connector.Argument> options = connector.defaultArguments();
+          options.get("hostname").setValue("127.0.0.1"); options.get("port").setValue(args[0]); options.get("timeout").setValue("5000");
+          VirtualMachine vm = connector.attach(options); try { vm.resume(); } finally { try { vm.dispose(); } catch (VMDisconnectedException exited) {} }
+        } }`);
+      const java = process.env.LITHE_TEST_JAVA ?? 'java';
+      const javac = java.includes('/') ? join(resolve(java, '..'), 'javac') : 'javac';
+      await runCommand(javac, [helper], { signal, timeoutMs: 10000 });
+      let debugOutput = '', ready;
+      const listening = new Promise(resolve => { ready = resolve; });
+      const controller = new AbortController(), abort = () => controller.abort(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      const running = runCommand(maven, debugPlan.arguments, { cwd, env: { ...process.env, ...debugPlan.environment },
+        signal: controller.signal, timeoutMs: mavenTimeout(), onOutput: chunk => {
+          debugOutput = (debugOutput + chunk).slice(-100000);
+          if (debugOutput.includes('Listening for transport dt_socket at address: ' + port)) ready();
+        } });
+      try {
+        await bounded(Promise.race([listening, running.then(() => { throw new Error('JVM exited before the debug listener: ' + debugOutput); })]), 'suspended framework JVM', 20000);
+        assert.ok(!debugOutput.includes('Hello, Provider'), 'the application must be suspended before attachment');
+        const tools = join(process.env.JAVA_HOME ?? resolve(realpathSync(java), '../..'), 'lib/tools.jar');
+        await runCommand(java, ['-cp', scratch + (existsSync(tools) ? delimiter + tools : ''), 'ResumeJvm', String(port)], { signal, timeoutMs: 10000 });
+        await running;
+        assert.ok(debugOutput.includes('Hello, Provider') && debugOutput.includes('POMFLAG=preserved'), debugOutput);
+      } finally {
+        signal.removeEventListener('abort', abort); controller.abort();
+        await running.catch(() => {});
+      }
       assert.ok(!output.includes('spring-boot-maven-plugin:2.2.2.RELEASE:run (default-cli) on project reactor'), output);
       await assert.rejects(send(build('build.prepareRunPlan', request({ launchOptions: { ...launchOptions, arguments: [''] } })).plan, 'framework-empty'), /preserve empty/);
       const moduleTarget = current.targets.find(value => value.projectID === app.id && value.name === 'maven.module');
