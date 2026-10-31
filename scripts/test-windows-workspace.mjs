@@ -1,10 +1,11 @@
 // The Windows TypeScript workflow, production Maven Provider and current Core.
 // Runs on macOS/Linux; native Windows launch/process acceptance is separate.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BackendClient, bounded } from './backend-client.mjs';
 import { coreCommand } from './core-client.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
@@ -38,6 +39,32 @@ await withInterrupts(async signal => {
         tool: { executable: process.env.LITHE_TEST_MAVEN }, executesProjectCode: false,
         environment: { JAVA_HOME: javaHome, PATH: join(javaHome, 'bin') + delimiter + process.env.PATH } }),
       guard: () => () => {},
+      // Test-only native I/O port: private XML is hashed here, never returned to
+      // the production TypeScript workflow or sent back over Provider RPC.
+      configurationCheck: async (_target, sources) => {
+        const paths = [], revisions = [];
+        for (const source of sources) {
+          const file = fileURLToPath(source.uri); paths.push(file);
+          let descriptor;
+          try {
+            const metadata = statSync(file);
+            assert.ok(metadata.isFile() && metadata.size <= 2 * 1024 * 1024, 'bounded regular configuration source');
+            descriptor = openSync(file, 'r');
+            const opened = fstatSync(descriptor); assert.ok(opened.isFile() && opened.size <= 2 * 1024 * 1024);
+            const buffer = Buffer.alloc(2 * 1024 * 1024 + 1);
+            let length = 0;
+            while (length < buffer.length) {
+              const count = readSync(descriptor, buffer, length, buffer.length - length, null);
+              if (count === 0) break;
+              length += count;
+            }
+            assert.ok(length <= 2 * 1024 * 1024);
+            revisions.push('sha256:' + createHash('sha256').update(buffer.subarray(0, length)).digest('hex'));
+          } catch (error) { if (error.code !== 'ENOENT') throw error; revisions.push('missing'); }
+          finally { if (descriptor !== undefined) closeSync(descriptor); }
+        }
+        return { current: sources.every((source, index) => source.revision === revisions[index]), paths };
+      },
       providers: {
         send: async (_target, request) => {
           requests.push(request.method);
@@ -85,7 +112,7 @@ await withInterrupts(async signal => {
       model = await workspace.loadModel(instance).completion;
       assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
       assert.ok(model.contentRoots.some(content => content.path === 'nested/core/src/main/java'));
-      assert.deepEqual(requests, ['lithe/build/configuration', 'lithe/build/model']);
+      assert.deepEqual(requests, ['lithe/build/configuration', 'lithe/build/configuration', 'lithe/build/model']);
     });
     await report.step('Windows executes real reactor tests and decodes inline reports', async () => {
       const operation = workspace.executeTask(instance, 'test');
@@ -93,6 +120,22 @@ await withInterrupts(async signal => {
       assert.equal(result.exitCode, 0, result.output);
       assert.ok(result.results.tests.some(test => test.suite === 'demo.core.GreeterTest'));
       assert.equal(workspace.operations().find(record => record.id === operation.operationID).phase, 'succeeded');
+    });
+    await report.step('Windows prepares a real module Run through public Core plans without replacing the default model', async () => {
+      const project = model.projects.find(project => project.name === 'core');
+      const run = manifest.buildSystems[0].run.find(run => run.execution === 'task');
+      const target = model.targets.find(target => target.projectID === project.id && target.tags.some(tag => run.fromTargets.tags.includes(tag)));
+      assert.ok(target, 'a current module target is published by the Provider');
+      const defaults = structuredClone(workspace.model(instance));
+      const prepared = await workspace.prepareRun(instance, { run: run.id, projectID: project.id, targetID: target.id,
+        launchOptions: { execution: 'task', runtimeArguments: [], arguments: ['compile'], environment: {}, workingDirectory: root } }).completion;
+      assert.deepEqual(prepared.launch.executable, { kind: 'toolchain', value: 'project-maven' });
+      assert.ok(prepared.launch.arguments.includes('compile'));
+      assert.equal(prepared.languageImport.kind, 'maven');
+      assert.equal(prepared.languageImport.mavenContext.mavenExecutablePath, process.env.LITHE_TEST_MAVEN);
+      prepared.assertCurrent(); await prepared.validate();
+      assert.deepEqual(workspace.model(instance), defaults);
+      assert.deepEqual(instance.options, { profiles: ['ci'] });
     });
     await report.step('Windows selects dependencies from the same current Provider project', async () => {
       const project = model.projects.find(project => project.name === 'core');
