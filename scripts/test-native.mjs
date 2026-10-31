@@ -13,6 +13,12 @@ import { createReport } from './report.mjs';
 const id = 'io.github.lithe-idea.maven-build';
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve('dist/package', id));
 const before = bundleManifest(pkg);
+const manifest = JSON.parse(readFileSync(join(pkg, 'plugin.json')));
+const preparationTask = role => {
+  const tasks = manifest.buildSystems[0].tasks.filter(task => task.preparation?.purpose === 'run' && task.preparation.sourceRoles.includes(role));
+  assert.equal(tasks.length, 1, `Exactly one run preparation for ${role}`);
+  return tasks[0].id;
+};
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'lithe-maven-native-')));
 const workspace = join(scratch, 'workspace');
 const root = join(workspace, 'nested');
@@ -82,8 +88,8 @@ await withInterrupts(async (signal) => {
       assert.match(result.output, /\[WARNING\]/);
     });
     await report.step('Java resource tasks preserve effective options and refuse missing projects or injected goals', async () => {
-      for (const [task, goals] of [['java-prepare-run-main', ['resources:resources']],
-        ['java-prepare-run-test', ['resources:resources', 'resources:testResources']]]) {
+      for (const [task, goals] of [[preparationTask('source'), ['resources:resources']],
+        [preparationTask('testSource'), ['resources:resources', 'resources:testResources']]]) {
         const result = await client.request('lithe/build/execute', params({ task, project: selected, options: { profiles: ['ci'] }, operationID: task }));
         assert.equal(result.exitCode, 0);
         assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-Pci', '-pl', 'core', '-am', ...goals]);

@@ -60,6 +60,7 @@ public final class MavenBackend {
             runs = new MavenRuns(snapshots, backend, state);
         });
         backend.onConfiguration((params, context) -> ConfigurationProbe.read(inputs(params), workspaceState, context.cancellation()));
+        backend.onEditConfiguration((params, context) -> ConfigurationEditor.edit(inputs(params), workspaceState, params, context.cancellation()));
         backend.onModel((params, context) -> copy(load(params, context).model()));
         backend.onDependencies(this::dependencies);
         backend.onExecute((params, context) -> execution(params, context, false));

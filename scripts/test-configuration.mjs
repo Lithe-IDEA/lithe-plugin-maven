@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { BackendClient, bounded } from './backend-client.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
 import { coreCommand } from './core-client.mjs';
-import { withInterrupts } from './process.mjs';
+import { withInterrupts, runCommand } from './process.mjs';
 import { createReport } from './report.mjs';
 
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve('dist/package', 'io.github.lithe-idea.maven-build'));
@@ -44,6 +44,15 @@ await withInterrupts(async signal => {
   const stop = () => { for (const client of clients) client.kill(); };
   signal.addEventListener('abort', stop, { once: true });
   try {
+    const editorTests = join(scratch, 'editor-tests'); mkdirSync(editorTests);
+    await report.step('compile the production Maven settings editor regressions', () => runCommand(join(dirname(java), 'javac'),
+      ['-encoding', 'UTF-8', '-source', '8', '-target', '8', '-cp', join(pkg, 'lib/lithe-maven-backend.jar'), '-d', editorTests,
+        resolve('test/fixtures/configuration-editor/ConfigurationEditorRegression.java')], { signal, timeoutMs: 20000 }));
+    for (const name of ['preserve', 'namespace', 'list', 'reset-and-missing', 'bom', 'invalid']) {
+      await report.step('Maven settings editor: ' + name, () => runCommand(java,
+        ['-cp', editorTests + (process.platform === 'win32' ? ';' : ':') + join(pkg, 'lib/lithe-maven-backend.jar'),
+          'io.github.litheidea.maven.backend.ConfigurationEditorRegression', name], { signal, timeoutMs: 10000 }));
+    }
     mkdirSync(join(root, '.mvn'), { recursive: true });
     mkdirSync(home);
     // An invalid POM proves that inspection exits before reactor import.
@@ -70,15 +79,27 @@ await withInterrupts(async signal => {
       assert.equal(existsSync(join(root, 'target')), false);
       assert.equal(existsSync(repository), false, 'Reading inherited configuration must not create its repository');
     });
-    await report.step('Core edits the approved native field and Maven re-reads the saved source', async () => {
+    await report.step('the Maven provider edits private staging and Maven re-reads the published source', async () => {
       const source = snapshot.sources.find(source => source.id === 'user');
-      const replacement = coreCommand('build.editConfigurationDocument', payload({ snapshot,
-        edits: { sourceID: 'user', revision: source.revision, values: { localRepository: join(scratch, 'saved-repository') } },
-        document: sourcesBefore[0].toString('utf8') })).edit;
-      assert.equal(hash(readFileSync(user)), source.revision);
-      writeFileSync(user, replacement.document);
-      assert.ok(replacement.document.includes('<!--keep-->'));
-      assert.ok(replacement.document.includes('<password>fixture-secret-sentinel</password>'));
+      const outputFile = join(state, 'native-edit.json');
+      writeFileSync(outputFile, '', { mode: 0o600 });
+      const edits = { sourceID: 'user', revision: source.revision, values: { localRepository: join(scratch, 'saved-repository') } };
+      const planned = coreCommand('build.configurationEditPlan', payload({ ...request({ settingsFile: user }),
+        workspaceStateDirectory: state, outputFile, snapshot, edits })).plan;
+      const raw = await client.request(planned.provider.method, planned.provider.params);
+      const receipt = coreCommand('build.decodeConfigurationEdit', payload({ snapshot, edits, result: raw })).edit;
+      assert.equal(hash(readFileSync(user)), source.revision, 'Provider never writes the original source');
+      assert.ok(!JSON.stringify(raw).includes('fixture-secret-sentinel'));
+      const replacement = readFileSync(outputFile);
+      assert.equal(receipt.revision, hash(replacement));
+      assert.ok(replacement.toString().includes('<!--keep-->'));
+      assert.ok(replacement.toString().includes('<password>fixture-secret-sentinel</password>'));
+      writeFileSync(user, replacement);
+      rmSync(outputFile);
+      const fresh = await client.request('lithe/build/configuration', request({ settingsFile: user }));
+      const laterEdits = { sourceID: 'user', revision: fresh.sources.find(source => source.id === 'user').revision, values: { localRepository: join(scratch, 'late-repository') } };
+      await assert.rejects(client.request(planned.provider.method, { ...planned.provider.params, snapshot: fresh, edits: laterEdits }));
+      assert.equal(existsSync(outputFile), false, 'A late request cannot recreate host staging');
       const updated = await client.request('lithe/build/configuration', request({ settingsFile: user }));
       const field = updated.sources.find(source => source.id === 'user').fields.find(field => field.id === 'localRepository');
       assert.equal(field.value, join(scratch, 'saved-repository'));

@@ -225,8 +225,11 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 通用的构建系统设置页通过 `lithe/build/configuration` 读取 Maven 实际选中的安装级和用户级
 settings.xml，显示非敏感的 localRepository、activeProfiles 原值及实际生效值。打开页面只读；
 只有显式开启覆盖并保存，宿主才修改所列来源。安装来源以及与安装文件相同的用户来源始终只读。
-保存使用源字节哈希防止覆盖外部编辑，保留其他内容、注释、权限和凭据，再由 Maven 重新读取
-生效值。命令行覆盖值单独显示，不能将保存的原值直接当成生效值。
+保存通过 `lithe/build/editConfiguration` 交给本插件的 JDK 安全 DOM 读写器，只生成
+宿主已有私有暂存文件的替换内容，不直接改原文件；协议没有 XML 根或路径绑定。返回
+来源 ID 和 SHA-256 回执后，宿主核对原字节、配置代次与输出哈希，以保留元数据的原子
+替换发布，再由 Maven 重新读取生效值。注释、无关内容和凭据留在原生文件边界内，
+Core 不解析或编辑 Maven XML。提供者禁止 CREATE 暂存文件，取消后不能重新生成它。命令行覆盖值单独显示，不能将保存的原值直接当成生效值。
 
 扩展观察 Maven 官方的 SettingsBuildingRequest/Result 事件，不重新实现配置优先级；
 会话执行请求提供最终 CLI 值。配置读取在 reactor 导入前结束，因此损坏 POM 不会阻止查看
@@ -269,8 +272,9 @@ Maven 后端才把类或 `类#方法()` 映射成 Surefire 的精确选择器；
 已配置的测试 Mojo 通过公开 setter 跳过未选工程；原始 `-Dtest=*` 不会扩大类型化选择。
 没有明确整类选择时，继承的上游筛选可能仍有效，所以只声明报告中返回的方法覆盖。
 
-Java 启动前的公开项目任务 `java-prepare-run-main`／`java-prepare-run-test`
-分别通过 Maven 的 `resources:resources`，或再加 `resources:testResources` 处理资源。
+清单以 `buildSystems: 4` 声明 `preparation.purpose: "run"` 和适用的模型源码角色，
+宿主按用途和角色选择准备任务。`java-prepare-run-main`／`java-prepare-run-test`
+只是本插件内部任务 ID，不是宿主约定。它们分别通过 Maven 的 `resources:resources`，或再加 `resources:testResources` 处理资源。
 自定义目录、过滤和 Profile 由当前 Maven 模型处理；依赖仍按 `-am` 参与，不在宿主
 重新解析 POM。任务需要当前工程且不接受附加目标，失败或取消不能作为启动成功。
 

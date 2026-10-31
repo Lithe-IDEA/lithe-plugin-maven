@@ -16,6 +16,11 @@ const id = 'io.github.lithe-idea.maven-build';
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve('dist/package', id));
 const before = bundleManifest(pkg);
 const manifest = JSON.parse(readFileSync(join(pkg, 'plugin.json')));
+const preparationTask = role => {
+  const tasks = manifest.buildSystems[0].tasks.filter(task => task.preparation?.purpose === 'run' && task.preparation.sourceRoles.includes(role));
+  assert.equal(tasks.length, 1, `Exactly one run preparation for ${role}`);
+  return tasks[0].id;
+};
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'lithe-maven-core-')));
 const workspace = join(scratch, 'workspace');
 const root = 'nested';
@@ -183,14 +188,14 @@ await withInterrupts(async (signal) => {
           <testResources><testResource><directory>test inputs</directory><filtering>true</filtering></testResource></testResources></build>
           <profiles><profile><id>prepared</id><properties><prepared.value>upstream</prepared.value></properties></profile></profiles></project>`));
         const plan = task => build('build.taskPlan', planned({ task, project, options: { profiles: ['prepared'] } })).plan;
-        const main = await send(plan('java-prepare-run-main'), 'prepare-main-resources');
+        const main = await send(plan(preparationTask('source')), 'prepare-main-resources');
         assert.equal(main.exitCode, 0, main.output);
         assert.equal(readFileSync(join(directory, 'target/classes/runtime.properties'), 'utf8'), 'selected=upstream');
         assert.equal(existsSync(join(directory, 'target/test-classes/test.properties')), false);
-        const tests = await send(plan('java-prepare-run-test'), 'prepare-test-resources');
+        const tests = await send(plan(preparationTask('testSource')), 'prepare-test-resources');
         assert.equal(tests.exitCode, 0, tests.output);
         assert.equal(readFileSync(join(directory, 'target/test-classes/test.properties'), 'utf8'), 'test=upstream');
-        await assert.rejects(send(build('build.taskPlan', planned({ task: 'java-prepare-run-main', project, userArguments: ['verify'] })).plan,
+        await assert.rejects(send(build('build.taskPlan', planned({ task: preparationTask('source'), project, userArguments: ['verify'] })).plan,
           'reject-extra-resource-goals'), /no raw goals/);
       } finally { writeFileSync(pom, original); rmSync(resources, { recursive: true, force: true }); rmSync(testResources, { recursive: true, force: true }); }
     });

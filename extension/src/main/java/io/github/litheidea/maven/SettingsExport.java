@@ -198,8 +198,6 @@ final class SettingsExport {
             Map<String, Object> source = new LinkedHashMap<>();
             source.put("id", id); source.put("scope", id); source.put("uri", path.toUri().toString());
             source.put("revision", revision); source.put("writable", writable);
-            Map<String, Object> root = new LinkedHashMap<>(); root.put("name", rootName); root.put("namespace", rootNamespace);
-            source.put("rootElement", root);
             List<Object> fields = new ArrayList<>();
             fields.add(field("localRepository", "directory", settings.getLocalRepository(), repository, repositoryOrigin, null));
             fields.add(field("activeProfiles", "stringList", activeProfiles ? settings.getActiveProfiles() : null,
@@ -212,8 +210,6 @@ final class SettingsExport {
             Map<String, Object> field = new LinkedHashMap<>();
             field.put("id", name); field.put("kind", kind); field.put("value", value);
             field.put("effectiveValue", effective); field.put("effectiveSource", origin);
-            field.put("path", Collections.singletonList(name));
-            if (item != null) field.put("itemElement", item);
             return field;
         }
     }
