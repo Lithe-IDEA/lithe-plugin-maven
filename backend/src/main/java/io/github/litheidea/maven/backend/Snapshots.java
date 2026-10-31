@@ -18,7 +18,7 @@ import java.util.Map;
  * fingerprint of the inputs it was computed from.
  *
  * <pre>
- * { "snapshotVersion": 1,
+ * { "snapshotVersion": 2,
  *   "roots": { "/abs/root": { "fingerprint", "savedAt", "model", "dependencies" } } }
  * </pre>
  *
@@ -28,7 +28,7 @@ import java.util.Map;
  */
 final class Snapshots {
     static final String KEY = "maven-snapshot";
-    static final int VERSION = 1;
+    static final int VERSION = 2;
     /** Roots kept per workspace; the least recently saved go first. */
     private static final int MAX_ROOTS = 32;
 
@@ -44,10 +44,12 @@ final class Snapshots {
     synchronized MavenRuns.Loaded read(Path root, String fingerprint) {
         Map<String, Object> entry = Json.object(roots(store.read(KEY, null)).get(root.toString()));
         if (!fingerprint.equals(entry.get("fingerprint"))
-                || !(entry.get("model") instanceof Map) || !(entry.get("dependencies") instanceof Map)) {
+                || !(entry.get("model") instanceof Map) || !(entry.get("dependencies") instanceof Map)
+                || !NativeSources.current(entry.get("nativeSources"))) {
             return null;
         }
-        return new MavenRuns.Loaded(Json.object(entry.get("model")), Json.object(entry.get("dependencies")));
+        return new MavenRuns.Loaded(Json.object(entry.get("model")), Json.object(entry.get("dependencies")),
+                new ArrayList<>((List<?>) entry.get("nativeSources")));
     }
 
     synchronized void write(Path root, String fingerprint, MavenRuns.Loaded loaded) {
@@ -57,6 +59,7 @@ final class Snapshots {
         entry.put("savedAt", System.currentTimeMillis());
         entry.put("model", loaded.model());
         entry.put("dependencies", loaded.dependencies());
+        entry.put("nativeSources", loaded.nativeSources());
         roots.remove(root.toString());
         roots.put(root.toString(), entry);
         prune(roots);

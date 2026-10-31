@@ -12,3 +12,8 @@ Version 2.0, at revision 158b854d47ac9af2bbd99c0d7c354a5875cb6f81:
   skipTests.svg  platform/icons/src/expui/run/showIgnored.svg
 
 Copyright 2000-2024 JetBrains s.r.o. and contributors.
+
+The backend includes Apache Maven Surefire Report Parser and Logger API 3.5.2,
+Apache Maven Shared Utils 3.3.4, and Apache Commons IO 2.19.0, under the Apache
+License, Version 2.0. Copyright The Apache Software Foundation and contributors.
+Their license and notice files are also retained inside the backend JAR.

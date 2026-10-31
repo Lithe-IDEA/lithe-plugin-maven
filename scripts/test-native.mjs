@@ -23,7 +23,10 @@ const executable = join(scratch, 'mvn');
 const clients = new Set();
 const report = createReport('native-maven');
 const runs = () => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-const executionRuns = () => runs().filter(run => !run.argv.includes('pre-clean'));
+const executionRuns = () => runs().filter(run => !run.argv.includes('pre-clean')).map(run => ({ ...run,
+  instrumentation: run.argv.filter(arg => ['-Dmaven.ext.class.path=', '-Dlithe.reportOutput=', '-Dlithe.reportWorkspace=', '-Dlithe.testProject='].some(prefix => arg.startsWith(prefix))),
+  argv: run.argv.filter(arg => !['-Dmaven.ext.class.path=', '-Dlithe.reportOutput=', '-Dlithe.reportWorkspace=', '-Dlithe.testProject='].some(prefix => arg.startsWith(prefix))),
+}));
 const control = value => writeFileSync(controlFile, JSON.stringify(value));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
 async function until(condition, description) {
@@ -37,12 +40,13 @@ async function until(condition, description) {
 const params = (extra = {}) => ({ buildSystemID: 'maven', root: 'nested', options: {}, optionArguments: [], environment: {},
   tool: { executable }, userArguments: [], ...extra });
 const selected = { name: 'core', path: 'nested/core' };
+const exact = (suite, method) => '-Dtest=%regex[\\Q' + suite.replaceAll('.', '/') + '.class\\E#\\Q' + method + '\\E(?:\\(.*\\))?(?:\\[.*\\])?]';
 async function start() {
   const client = new BackendClient({ java: process.env.LITHE_TEST_JAVA ?? 'java', jar: join(pkg, 'lib/lithe-maven-backend.jar'),
     state, javaOptions: [`-Duser.home=${join(scratch, 'home')}`],
     env: { ...process.env, FAKE_MAVEN_CONTROL: controlFile, FAKE_MAVEN_LOG: log } });
   clients.add(client);
-  assert.equal((await client.initialize(workspace, [3])).capabilities.experimental.litheBuild.version, 3);
+  assert.equal((await client.initialize(workspace, [9])).capabilities.experimental.litheBuild.version, 9);
   return client;
 }
 await withInterrupts(async (signal) => {
@@ -69,10 +73,25 @@ await withInterrupts(async (signal) => {
       assert.equal(result.exitCode, 0);
       const run = executionRuns().at(-1);
       assert.equal(run.cwd, root);
+      assert.equal(run.instrumentation.length, 4);
+      assert.ok(run.instrumentation.some(arg => arg.startsWith('-Dlithe.reportOutput=' + state + '/execution-')));
+      assert.deepEqual(result.testResults.tests, []);
       assert.deepEqual(run.argv, ['-B', '-ntp', '-Pci', '-s', '/fixture settings.xml', '-Dmaven.repo.local=/fixture repository', '-o', '-DskipTests', '-pl', 'core', 'package', '-Dmessage=two words']);
       const progress = client.notifications.filter(message => message.method === 'lithe/build/progress' && message.params.operationID === 'package');
       assert.equal(progress.map(message => message.params.output ?? '').join(''), result.output);
       assert.match(result.output, /\[WARNING\]/);
+    });
+    await report.step('Java resource tasks preserve effective options and refuse missing projects or injected goals', async () => {
+      for (const [task, goals] of [['java-prepare-run-main', ['resources:resources']],
+        ['java-prepare-run-test', ['resources:resources', 'resources:testResources']]]) {
+        const result = await client.request('lithe/build/execute', params({ task, project: selected, options: { profiles: ['ci'] }, operationID: task }));
+        assert.equal(result.exitCode, 0);
+        assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-Pci', '-pl', 'core', '-am', ...goals]);
+        const count = executionRuns().length;
+        await assert.rejects(client.request('lithe/build/execute', params({ task, operationID: task + '-no-project' })), /current project/);
+        await assert.rejects(client.request('lithe/build/execute', params({ task, project: selected, userArguments: ['verify'], operationID: task + '-raw' })), /no raw goals/);
+        assert.equal(executionRuns().length, count);
+      }
     });
     await report.step('model goals are checked against the current Maven extension output', async () => {
       const modelTask = { name: 'compiler:compile', path: 'nested/core', properties: { goal: 'org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile' } };
@@ -88,14 +107,32 @@ await withInterrupts(async (signal) => {
       const result = await client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest', case: 'greets',
         options: { skipTests: true }, operationID: 'exact-test' }));
       assert.equal(result.exitCode, 0);
-      assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-pl', 'core', '-am', '-Dtest=demo.core.GreeterTest#greets', '-Dsurefire.failIfNoSpecifiedTests=false', 'test']);
+      assert.equal(result.testResults.tests[0].suite, 'demo.core.GreeterTest');
+      assert.equal(result.testResults.tests[0].project, 'nested/core');
+      assert.deepEqual(executionRuns().at(-1).argv, ['-B', '-ntp', '-pl', 'core', '-am', 'test', exact('demo.core.GreeterTest', 'greets'), '-Dsurefire.failIfNoSpecifiedTests=false']);
       const count = executionRuns().length;
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: '*', operationID: 'wildcard' })), /exact Surefire/);
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, case: 'greets', operationID: 'no-suite' })), /needs its suite/);
       assert.equal(executionRuns().length, count);
     });
+    await report.step('opaque JDT identities reach Surefire exactly and reject unsupported or missing selections', async () => {
+      const result = await client.request('lithe/build/test', params({ project: selected,
+        selectorKind: 'java.test.fullName', selectors: ['demo.core.GreeterTest#greets()'], operationID: 'semantic-test' }));
+      assert.equal(result.exitCode, 0);
+      assert.ok(executionRuns().at(-1).argv.includes(exact('demo.core.GreeterTest', 'greets')));
+      await client.request('lithe/build/test', params({ project: selected,
+        selectorKind: 'java.test.fullName', selectors: ['示例.测试#校验()'], operationID: 'unicode-semantic-test' }));
+      assert.ok(executionRuns().at(-1).argv.includes(exact('示例.测试', '校验')));
+
+      for (const selectors of [['*'], ['demo.core.GreeterTest#greets(java.lang.String)']]) {
+        await assert.rejects(client.request('lithe/build/test', params({ project: selected,
+          selectorKind: 'java.test.fullName', selectors, operationID: 'invalid-semantic-test' })));
+      }
+    });
     await report.step('an old or empty Surefire report cannot make an unknown selector pass', async () => {
       control({ execution: { noReport: true } });
+      await assert.rejects(client.request('lithe/build/test', params({ project: selected, selectorKind: 'java.test.fullName',
+        selectors: ['demo.core.GreeterTest#greets()'], operationID: 'stale-semantic-test' })), /no fresh result/);
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest', case: 'greets',
         operationID: 'stale-test' })), /no fresh result/);
       control({});
@@ -104,6 +141,21 @@ await withInterrupts(async (signal) => {
       control({ execution: { reportSuite: 'other.demo.core.GreeterTest' } });
       await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest', case: 'greets',
         operationID: 'wrong-package-test' })), /no fresh result/);
+      control({});
+    });
+    await report.step('another reactor project cannot satisfy an exact report-derived test selection', async () => {
+      control({ execution: { reportProject: 'nested/app' } });
+      await assert.rejects(client.request('lithe/build/test', params({ project: selected, suite: 'demo.core.GreeterTest',
+        case: 'greets', operationID: 'wrong-project-report' })), /no fresh result/);
+      control({});
+    });
+    await report.step('malformed or external-entity reports fail closed and release operation state', async () => {
+      for (const badReport of ['broken', 'external-entity']) {
+        control({ execution: { badReport } });
+        await assert.rejects(client.request('lithe/build/test', params({ project: selected,
+          suite: 'demo.core.GreeterTest', operationID: 'bad-' + badReport })));
+        assert.deepEqual((await (await import('node:fs/promises')).readdir(state)).filter(name => name.startsWith('execution-')), []);
+      }
       control({});
     });
     await report.step('a custom goal preserves user arguments and an unknown project cannot execute', async () => {

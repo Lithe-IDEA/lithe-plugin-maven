@@ -2,7 +2,7 @@
 
 为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
-这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 3`）实现，
+这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 7`）实现，
 除了下面说的 Maven 扩展 jar 和读取项目用的 Java 后端，没有任何宿主代码。
 
 > English: Maven support for Lithe through the declarative `buildSystems` plugin API — project tree, lifecycle and
@@ -78,7 +78,13 @@ Provider 进度传回，最终结果保留非零退出码；取消或宿主退�
 测试的类和方法选择映射到 Surefire 的公开接口，特殊模式明确拒绝，不把一个精确
 请求扩大成通配匹配。使用 -am 构建依赖模块时，它们可以没有所选测试；执行结束后
 还检查当前模块/反应堆是否产生所选测试的新报告，避免“不存在的方法 + 成功空结果”
-或旧报告被当成测试通过。完整结果仍由宿主既有 JUnit XML 解析器展示。
+或旧报告被当成测试通过。报告由插件随本次执行返回（buildProviders 8），宿主仅校验并展示规范化结果。
+Maven 已配置的 Surefire/Failsafe 实例提供实际报告目录，支持自定义目录；插件在执行
+前后比较有界字节、时间和文件身份，只有新报告进入当前结果。Apache Surefire Report
+Parser 3.5.2 解释状态，读入同一份字节前拒绝 DTD/外部实体；失败执行同样返回报告，
+两个模块里的同名测试保留各自工程身份。私有快照位于宿主工作区状态目录的 execution-*，
+操作结束删除，原始报告继续留在用户工程，不修改插件包。干净打包还核对 Sisu 组件注册，
+不依赖上一次编译的索引。
 
 插件通过 buildModelInputs 1 显式公开规范化项目、目标、内容目录及 profiles/offline/
 skipTests 的生效值；共享内容不包含任务、运行计划、settings.xml 内容或私有函数。
@@ -213,3 +219,113 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 ## 许可
 
 [Apache-2.0](LICENSE)。图标来自 IntelliJ Platform，见 [NOTICE](NOTICE)。
+
+## 原生配置（协议 7，开发中）
+
+通用的构建系统设置页通过 `lithe/build/configuration` 读取 Maven 实际选中的安装级和用户级
+settings.xml，显示非敏感的 localRepository、activeProfiles 原值及实际生效值。打开页面只读；
+只有显式开启覆盖并保存，宿主才修改所列来源。安装来源以及与安装文件相同的用户来源始终只读。
+保存使用源字节哈希防止覆盖外部编辑，保留其他内容、注释、权限和凭据，再由 Maven 重新读取
+生效值。命令行覆盖值单独显示，不能将保存的原值直接当成生效值。
+
+扩展观察 Maven 官方的 SettingsBuildingRequest/Result 事件，不重新实现配置优先级；
+会话执行请求提供最终 CLI 值。配置读取在 reactor 导入前结束，因此损坏 POM 不会阻止查看
+原生配置。整个 XML 不跨 Provider RPC，服务器/代理密码等字段既不导出也不记录。工具探针
+只在已分配的工作区状态创建临时目录，调用结束清理；app 和插件安装资源不变。
+
+模型缓存版本 2 只存实际上游选中的 settings/toolchains 的 URI 与字节哈希。它在读取和发布
+结果时校验来源，在下一次请求复用缓存前再次核对；修改、删除或换向选中来源即使没有 POM
+事件也会使缓存失效。旧缓存只是可重建结果，版本不匹配即重新读取。来源哈希不是可跨工作树
+复用的构建身份，不复制缓存或探针目录。用户原生文件只由宿主明确保存流程写入。
+
+显式运行隔离测试（不会使用或修改开发者真实 settings）：
+
+```bash
+LITHE_TEST_JAVA=/absolute/java LITHE_TEST_MAVEN=/absolute/mvn \
+LITHE_CORE_LIBRARY=/absolute/liblithe_core.dylib node scripts/test-configuration.mjs
+```
+
+此能力依赖尚待正式发布、锁定的配套 SDK 和宿主。源码的开发包、Core 和原生 macOS
+测试通过不等于完成整个 #1495 阶段 D；旧配置数据、其余 Run/Test/Debug 和 Windows
+消费者仍需完成各自迁移并删除旧路径。
+
+`workflow_dispatch` 的开发 SDK lane 可额外指定 40 位 `core-revision`，构建该宿主 Core 后运行
+原生配置及真实构建/精确测试的集成；SDK、Core 都按明确提交选取，不修改正式锁定文件。
+
+构建选项要求 `buildSystems: 3`，按每个检测到的 reactor 根独立保存；Profiles、settings 文件、仓库、离线和跳过测试不再共享同一个工作区值。宿主升级作用域时须先复制并读回旧 Build 选项，保留已有实例覆盖和显式空选择后再删除旧表示。旧 MavenService 的数据迁移及消费者删除仍属于阶段 D 后续验收，不由这个清单变更代替。
+
+工具解析要求 `executableResolution: 2`，通过宿主已有 `project-maven` / `project-maven-jdk` 注册表读取 `.lithe/run/local.json` 的当前实例选择，复用 Run 的配置链。宿主把选中的 Maven 路径以及有限的运行时环境（含 JAVA_HOME/PATH）交给 Provider；Provider 进程自身的 JDK 不等于 Maven 所用的 JDK。显式选择失败不能独立改用其他 Maven；被动导入不执行 Wrapper 或探测版本。
+
+只读配置探针观察 Maven 官方完成默认值填充后的 `MavenExecutionRequest`：先保留所选 settings、Profiles 和仓库事实，再将这次探针自己的仓库管理器隔离到临时 `configuration-*/repository`，在工程导入前退出。仅在 `afterSessionStart` 导出会过晚，可能已经创建用户仓库。读取、保存后的回读与 CLI 覆盖均不得创建实际仓库；临时目录统一清理。真实模型、依赖和构建使用原仓库，不采用此探针隔离。
+
+开发协议 9 还接受 JDT 提供的公开 `java.test.fullName` 标识。宿主原样转交标识，
+Maven 后端才把类或 `类#方法()` 映射成 Surefire 的精确选择器；不按源码文件名猜类名。
+不能精确表示的签名或模式会明确拒绝。成功执行还要求所选工程的新报告包含每个标识，
+依赖模块里的同名用例不能代替它。空选择列表只在明确的工作区/工程测试范围运行全部测试。
+
+精确筛选使用 Surefire 公开 `%regex[class#method]` 接口，引用完整类文件路径，
+避免普通全限定名模式的 `**/` 后缀匹配。参数化调用归并到同一 Java 方法；报告明确
+区分工程和覆盖范围，整类重跑才能移除该类过时的方法结果。`-am` 仍编译依赖，
+已配置的测试 Mojo 通过公开 setter 跳过未选工程；原始 `-Dtest=*` 不会扩大类型化选择。
+没有明确整类选择时，继承的上游筛选可能仍有效，所以只声明报告中返回的方法覆盖。
+
+Java 启动前的公开项目任务 `java-prepare-run-main`／`java-prepare-run-test`
+分别通过 Maven 的 `resources:resources`，或再加 `resources:testResources` 处理资源。
+自定义目录、过滤和 Profile 由当前 Maven 模型处理；依赖仍按 `-am` 参与，不在宿主
+重新解析 POM。任务需要当前工程且不接受附加目标，失败或取消不能作为启动成功。
+
+Maven 生效模型现在在每个工程发布 `run.modelVersion: "1"`；实际应用 Spring Boot、
+Quarkus 或 Micronaut 插件的非聚合工程还发布 `run.provider`。识别使用 Maven 的
+`getBuildPlugins()`，包含生效 Profile 和继承，只有 pluginManagement 时不会误报。
+宿主依据这些事实生成兼容的服务配置，不再解析 POM 判断框架；框架的既有启动规划
+仍在迁移中，不能把这个模型元数据等同于新的 Provider 服务启动接口。
+
+`java.minimumVersion` 来自 Maven 的实际编译执行计划和参数解析器，涵盖 Profile、
+继承、测试编译和自定义 compiler execution；只计算不执行。无法解析时记录诊断并
+保持未知，宿主不得回退到 POM 正则；插件仍以 Maven 3.6.3 API 和 Java 8 构建。
+
+Wrapper 元数据 `maven.wrapper` / `maven.minimumVersion` 来自所选 reactor 的原生
+脚本和 properties。读取遵循 Java Properties 的注释与转义，文件大小有硬上限；
+不执行 Wrapper，也不导出完整分发 URL。未知发行文件名保持未知，脚本新增、替换
+或删除均撤销后端快照，宿主同步观察这些文件；多个 reactor 不共用全局 Wrapper。
+
+
+开发协议 10 的框架和模块运行使用 `lithe/build/prepareRun`，目标来自当前 Maven
+模型，应用参数、JVM 参数、环境、入口和显式 cwd 分别传递。插件返回 portable
+启动计划，由宿主既有 Run 会话启动和停止进程。Spring Boot、Quarkus、Micronaut
+的目标选择来自生效的 build plugins；仅存在于 pluginManagement 的插件不会成为服务。
+框架启动保留同 reactor 的 workspace reader：先构建依赖，再仅在所选工程执行
+实际 Mojo，不把服务目标交给父工程。参数按当前 Mojo 描述符的数组/字符串类型
+设置，无法精确保留（例如不支持的空参数或 cwd）时明确拒绝。
+
+模块任务的用户输入是目标和普通 `-D` 属性；Profiles、settings、仓库、工程选择
+仍经类型化 Build 选项传递，不接受额外 CLI 覆盖制造第二套配置。属性和环境也
+参与准备时的有效模型读取。开发组合可用 `scripts/package-development.mjs`
+及 `scripts/test-native-core.mjs` 验证；正式 SDK 锁定和发行条件保持不变。
+
+开发协议 11 的 JVM 调试由宿主选择本机端口，后端按当前 Mojo 描述符设置回环监听和
+启动前暂停。参数绑定同时识别 Maven 的 `property` 与 `defaultValue` 表达式，例如
+Quarkus 的 `jvm.args` 属于后者。Spring Boot 保留已有 JVM 参数，Quarkus/Micronaut
+使用框架自带的调试开关；遇到重复 JDWP 或不兼容描述符明确拒绝。
+
+`scripts/test-framework-debug.mjs` 用固定的 Quarkus 3.15.5、Micronaut Maven Plugin
+4.7.2 和真实 reactor 验证暂停、标准 JDI 连接/恢复、参数、环境及兄弟模块依赖。
+Micronaut 夹具固定 Platform 4.7.6（Core/注解处理器 4.7.14），使用真实编译期依赖注入、
+Netty HTTP 控制器和 JSON 支持；JDI 恢复后通过回环 HTTP 请求验证注入服务读取未安装的
+reactor 兄弟模块，不再只用普通 main 作为 Micronaut 应用证据。应用异常会立即报告，
+HTTP 请求有独立期限。依据为 [Micronaut IoC](https://docs.micronaut.io/4.7.14/guide/#ioc)
+与[固定 Platform BOM](https://repo.maven.apache.org/maven2/io/micronaut/platform/micronaut-platform/4.7.6/micronaut-platform-4.7.6.pom)。
+此集成使用 Java 17+ 和 Maven 3.9+，不改变 Provider 自身的 Java 8 /
+Maven 3.6.3 支持声明。用 `LITHE_TEST_PACKAGE`、`LITHE_CORE_LIBRARY` 指向显式开发组合，
+`LITHE_TEST_JAVA` 与 `LITHE_TEST_MAVEN` 提供绝对工具路径；输出及逐项报告写入
+`LITHE_REPORT_DIR`，进程退出前清理全部所持 JVM。此测试不代替宿主 Debug UI 验收。
+
+`bun scripts/test-windows-workspace.mjs` 加载 `LITHE_HOST_SOURCE` 指定提交的 Windows
+TypeScript 工作区编排，连接真实 Provider 和 `LITHE_CORE_LIBRARY` 指定的 Core。
+它覆盖 reactor 模型、成功测试、逐工程依赖、失败报告和退出清理，并确认包字节不变；
+原生配置读取还验证损坏 POM 不妨碍读取、配置来源字节不变、秘密不导出、仓库和构建目录
+不创建，探针临时状态会清理。
+工具路径由 `LITHE_TEST_JAVA`、`LITHE_TEST_MAVEN` 明确提供。此 lane 可在 macOS/Linux
+运行，不需要安装宿主前端依赖，也不修改正式 SDK 锁定。它不代替 Windows 原生工具发现、
+Job Object 进程清理、Build UI、配置和 Run 消费者迁移；固定提交的开发 CI 在 runner
+Maven 组合执行该测试。

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // The production plugin, current Core C ABI, and a real Maven reactor in one workflow.
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, delimiter } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { BackendClient, bounded } from './backend-client.mjs';
 import { coreCommand } from './core-client.mjs';
 import { bundleManifest } from './bundle-manifest.mjs';
 import { createReport } from './report.mjs';
-import { mavenTimeout, withInterrupts } from './process.mjs';
+import { mavenTimeout, withInterrupts, runCommand } from './process.mjs';
 
 const id = 'io.github.lithe-idea.maven-build';
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? resolve('dist/package', id));
@@ -45,7 +46,7 @@ await withInterrupts(async (signal) => {
       state: join(scratch, 'state'), timeoutMs: mavenTimeout() });
     await report.step('Core admits the new Maven capability and produces only Provider plans', async () => {
       coreCommand('plugins.declarative.validate', { manifest });
-      assert.equal((await client.initialize(workspace, [3])).capabilities.experimental.litheBuild.version, 3);
+      assert.equal((await client.initialize(workspace, [11])).capabilities.experimental.litheBuild.version, 11);
       for (const task of manifest.buildSystems[0].tasks) { assert.equal(task.source, 'provider'); assert.deepEqual(task.arguments, []); }
       assert.equal(manifest.buildSystems[0].test.source, 'provider');
     });
@@ -55,6 +56,108 @@ await withInterrupts(async (signal) => {
       model = build('build.decodeModel', { workspaceRoot: workspace, root, options, result }).model;
       assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
       assert.ok(model.contentRoots.some(content => content.path === 'nested/core/src/main/java'));
+    });
+    await report.step('Maven configured compiler executions own Java requirements across profiles and modules', async () => {
+      const pom = join(workspace, root, 'pom.xml'), modulePom = join(workspace, root, 'core/pom.xml');
+      const original = readFileSync(pom, 'utf8'), originalModule = readFileSync(modulePom, 'utf8');
+      const version = project => project.properties['java.minimumVersion'];
+      try {
+        const read = async profiles => build('build.decodeModel', { workspaceRoot: workspace, root,
+          result: await send(build('build.modelPlan', planned({ options: { profiles, offline: true } })).plan, 'compiler-model') }).model;
+        assert.equal(version(model.projects.find(project => project.name === 'core')), '8');
+        writeFileSync(pom, original.replace('</profiles>', `<profile><id>compiler-floor</id><properties>
+          <maven.compiler.release>17</maven.compiler.release><maven.compiler.testRelease>21</maven.compiler.testRelease>
+          </properties></profile></profiles>`));
+        let current = await read(['compiler-floor']);
+        assert.equal(version(current.projects.find(project => project.name === 'core')), '21', 'test release is part of the effective compiler requirement');
+        assert.equal(version(current.projects.find(project => project.name === 'app')), '21');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>11</release></configuration><executions><execution><id>extra-compile</id>
+          <phase>compile</phase><goals><goal>compile</goal></goals><configuration><release>23</release></configuration>
+          </execution></executions></plugin></plugins></build></project>`));
+        current = await read(['compiler-floor']);
+        assert.equal(version(current.projects.find(project => project.name === 'core')), '23', 'custom execution configuration is interpreted by Maven');
+        assert.equal(version(current.projects.find(project => project.name === 'app')), '21', 'module override does not leak');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>\${unresolved.compiler.release}</release></configuration>
+          </plugin></plugins></build></project>`));
+        const absent = await read(['compiler-floor']);
+        assert.equal(version(absent.projects.find(project => project.name === 'core')), '21', 'Maven treats an absent expression as unset and retains the configured test release');
+        writeFileSync(modulePom, originalModule.replace('</project>', `<build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>
+          <configuration><release>unsupported-language</release></configuration>
+          </plugin></plugins></build></project>`));
+        const unknown = await read(['compiler-floor']);
+        assert.equal(version(unknown.projects.find(project => project.name === 'core')), undefined, 'an unsupported configured language stays unknown rather than guessing from the parent POM');
+
+        writeFileSync(pom, '<broken><maven.compiler.release>99</maven.compiler.release>');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+            minimumJavaVersion: version(project), contentRoots: [] })) }, null);
+        assert.equal(generated.toolchainRequirements.toolchains['project-jdk'].minimumVersion, '23');
+      } finally { writeFileSync(pom, original); writeFileSync(modulePom, originalModule); }
+    });
+    await report.step('native Wrapper metadata uses Properties semantics and script changes revoke cached facts', async () => {
+      const directory = join(workspace, root), wrapper = join(directory, 'mvnw'), windowsWrapper = join(directory, 'mvnw.cmd');
+      const properties = join(directory, '.mvn/wrapper/maven-wrapper.properties');
+      mkdirSync(join(directory, '.mvn/wrapper'), { recursive: true });
+      const read = async () => build('build.decodeModel', { workspaceRoot: workspace, root,
+        result: await send(build('build.modelPlan', planned({ options: { offline: true } })).plan, 'wrapper-model') }).model;
+      try {
+        writeFileSync(wrapper, '#!/bin/sh\nexit 99\n');
+        writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https\\://example.invalid/apache-maven-3.9.9-bin.zip\n');
+        let current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === 'mvnw'));
+        assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === '3.9.9'), 'native properties ignore comments and unescape the URL');
+        writeFileSync(properties, 'distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\n');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+            mavenMinimumVersion: project.properties['maven.minimumVersion'], mavenWrapper: root + '/' + project.properties['maven.wrapper'], contentRoots: [] })) }, null);
+        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].minimumVersion, '3.9.9');
+        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].wrapper, 'nested/mvnw');
+        writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https://example.invalid/custom.zip\n');
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === undefined), 'unrecognized distribution stays unknown');
+        rmSync(wrapper); writeFileSync(windowsWrapper, '@exit /b 99\n');
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === 'mvnw.cmd'), 'script-only changes invalidate the backend snapshot');
+        rmSync(windowsWrapper);
+        current = await read();
+        assert.ok(current.projects.every(project => project.properties['maven.wrapper'] === undefined), 'removing the last script revokes the Wrapper fact');
+        writeFileSync(wrapper, ''); truncateSync(wrapper, 64 * 1024 * 1024 + 1);
+        await assert.rejects(read(), 'an oversized script is rejected before an unbounded fingerprint allocation or Maven execution');
+      } finally {
+        rmSync(wrapper, { force: true }); rmSync(windowsWrapper, { force: true }); rmSync(properties, { force: true });
+      }
+    });
+    await report.step('effective Profile and inherited plugins own framework Run generation without host POM parsing', async () => {
+      const pom = join(workspace, root, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      try {
+        writeFileSync(pom, original.replace('</plugins>', `<plugin>
+          <groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><version>0.0.0-fixture</version>
+          </plugin></plugins>`).replace('</profiles>', `<profile><id>framework</id><build><plugins><plugin>
+          <groupId>io.quarkus.platform</groupId><artifactId>quarkus-maven-plugin</artifactId><version>0.0.0-fixture</version>
+          </plugin></plugins></build></profile></profiles>`));
+        const read = async profiles => build('build.decodeModel', { workspaceRoot: workspace, root,
+          result: await send(build('build.modelPlan', planned({ options: { profiles, offline: true } })).plan, 'framework-model') }).model;
+        const inactive = await read([]);
+        assert.ok(inactive.projects.every(project => project.properties['run.modelVersion'] === '1'));
+        assert.ok(inactive.projects.every(project => project.properties['run.provider'] === undefined), 'plugin management alone is not an applied framework');
+        const active = await read(['framework']);
+        assert.equal(active.projects.find(project => project.name === 'reactor').properties['run.provider'], undefined, 'aggregators are not services');
+        assert.ok(active.projects.filter(project => project.name !== 'reactor').every(project => project.properties['run.provider'] === 'quarkus.maven'), 'Maven applies the inherited active Profile');
+        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+          mavenRunProvider: project.properties['run.provider'], contentRoots: [] }));
+        writeFileSync(pom, '<deliberately-broken-after-Maven-returned-the-model>');
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [], diagnostics: [] }, projectOwnership: ownership }, null);
+        assert.deepEqual(generated.generated.configurations.map(item => item.id).sort(), ['quarkus.maven:nested/app', 'quarkus.maven:nested/core']);
+        for (const item of generated.generated.configurations) {
+          assert.equal(item.cwd, root); assert.equal(item.execution, 'service');
+        }
+      } finally { writeFileSync(pom, original); }
     });
     const project = model.projects.find(project => project.name === 'core');
     await report.step('Core plans a module build, Maven executes it, and the class file exists', async () => {
@@ -67,28 +170,302 @@ await withInterrupts(async (signal) => {
       const decoded = build('build.decodeDiagnostics', { workspaceRoot: workspace, root, output: result.output });
       assert.deepEqual(decoded.diagnostics, []);
     });
+    await report.step('Java preparation preserves Maven filtering, custom roots and main versus test resources', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      const resources = join(directory, 'custom inputs'), testResources = join(directory, 'test inputs');
+      mkdirSync(resources); mkdirSync(testResources);
+      writeFileSync(join(resources, 'runtime.properties'), 'selected=${prepared.value}');
+      writeFileSync(join(testResources, 'test.properties'), 'test=${prepared.value}');
+      try {
+        writeFileSync(pom, original.replace('</project>', `<build><resources><resource><directory>custom inputs</directory><filtering>true</filtering></resource></resources>
+          <testResources><testResource><directory>test inputs</directory><filtering>true</filtering></testResource></testResources></build>
+          <profiles><profile><id>prepared</id><properties><prepared.value>upstream</prepared.value></properties></profile></profiles></project>`));
+        const plan = task => build('build.taskPlan', planned({ task, project, options: { profiles: ['prepared'] } })).plan;
+        const main = await send(plan('java-prepare-run-main'), 'prepare-main-resources');
+        assert.equal(main.exitCode, 0, main.output);
+        assert.equal(readFileSync(join(directory, 'target/classes/runtime.properties'), 'utf8'), 'selected=upstream');
+        assert.equal(existsSync(join(directory, 'target/test-classes/test.properties')), false);
+        const tests = await send(plan('java-prepare-run-test'), 'prepare-test-resources');
+        assert.equal(tests.exitCode, 0, tests.output);
+        assert.equal(readFileSync(join(directory, 'target/test-classes/test.properties'), 'utf8'), 'test=upstream');
+        await assert.rejects(send(build('build.taskPlan', planned({ task: 'java-prepare-run-main', project, userArguments: ['verify'] })).plan,
+          'reject-extra-resource-goals'), /no raw goals/);
+      } finally { writeFileSync(pom, original); rmSync(resources, { recursive: true, force: true }); rmSync(testResources, { recursive: true, force: true }); }
+    });
     await report.step('Core and Surefire run one exact method and decode one report result', async () => {
       testPlan = build('build.testPlan', planned({ project, suite: 'demo.core.GreeterTest', case: 'greetsByName', userArguments: [] })).plan;
       assert.equal(testPlan.provider.method, 'lithe/build/test');
       const result = await send(testPlan, 'exact-test');
       assert.equal(result.exitCode, 0, result.output);
       const tests = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, projects: model.projects.map(project => project.path),
-        suite: 'demo.core.GreeterTest', output: result.output }).results;
+        suite: 'demo.core.GreeterTest', output: result.output, result: result.testResults }).results;
       assert.equal(tests.summary.total, 1, JSON.stringify(tests));
       assert.equal(tests.summary.failed, 0, JSON.stringify(tests));
       assert.equal(tests.tests[0].case, 'greetsByName');
       const progress = client.notifications.filter(message => message.method === 'lithe/build/progress' && message.params.operationID === 'exact-test');
       assert.equal(progress.map(message => message.params.output ?? '').join(''), result.output);
     });
+    await report.step('Core forwards semantic test identities and Maven reports the exact selected method', async () => {
+      const selectors = ['demo.core.GreeterTest#greetsByName()'];
+      const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors, userArguments: [] })).plan;
+      assert.deepEqual(plan.provider.params.selectors, selectors);
+      assert.equal(plan.provider.params.suite, undefined);
+      const result = await send(plan, 'semantic-test');
+      assert.equal(result.exitCode, 0, result.output);
+      const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+        projects: model.projects.map(value => value.path), result: result.testResults }).results;
+      assert.equal(decoded.summary.total, 1);
+      assert.equal(decoded.tests[0].case, 'greetsByName');
+      assert.equal(decoded.tests[0].project, 'nested/core');
+    });
+    await report.step('Unicode Java class and method identities survive the full Core Maven report roundtrip', async () => {
+      const source = join(workspace, root, 'core/src/test/java/demo/core/测试.java');
+      try {
+        writeFileSync(source, 'package demo.core; public class 测试 { @org.junit.Test public void 校验() { org.junit.Assert.assertTrue(true); } }');
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.测试#校验()'] })).plan;
+        const result = await send(plan, 'unicode-semantic-test');
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].suite, 'demo.core.测试');
+        assert.equal(decoded.tests[0].case, '校验');
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('an exact class cannot execute a different package with the same class-path suffix', async () => {
+      const directory = join(workspace, root, 'core/src/test/java/other/demo/core');
+      const source = join(directory, 'GreeterTest.java');
+      mkdirSync(directory, { recursive: true });
+      try {
+        writeFileSync(source, 'package other.demo.core; public class GreeterTest { @org.junit.Test public void greetsByName() { org.junit.Assert.fail("wrong package executed"); } }');
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.GreeterTest'] })).plan;
+        const result = await send(plan, 'exact-package-test');
+        assert.equal(result.exitCode, 0, result.output);
+        assert.deepEqual([...new Set(result.testResults.tests.map(value => value.suite))], ['demo.core.GreeterTest']);
+        assert.deepEqual(result.testResults.coverage, [{ project: 'nested/core', suite: 'demo.core.GreeterTest' }]);
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('parameterized invocations preserve the method selector, severity, count and total duration', async () => {
+      const source = join(workspace, root, 'core/src/test/java/demo/core/ParameterizedTest.java');
+      try {
+        writeFileSync(source, `package demo.core; @org.junit.runner.RunWith(org.junit.runners.Parameterized.class)
+          public class ParameterizedTest {
+            @org.junit.runners.Parameterized.Parameters public static java.util.Collection<Object[]> inputs() {
+              return java.util.Arrays.asList(new Object[][] {{1}, {2}}); }
+            public ParameterizedTest(int value) {} @org.junit.Test public void checks() { org.junit.Assert.assertTrue(true); }
+          }`);
+        const plan = build('build.testPlan', planned({ project, selectorKind: 'java.test.fullName', selectors: ['demo.core.ParameterizedTest#checks()'] })).plan;
+        const result = await send(plan, 'parameterized-method-test');
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path, result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].case, 'checks');
+        assert.equal(decoded.tests[0].invocations, 2);
+        assert.equal(decoded.tests[0].durationMillis, result.testResults.tests.reduce((sum, test) => sum + test.durationMillis, 0));
+      } finally { rmSync(source, { force: true }); }
+    });
+    await report.step('project selection builds prerequisites without running their identical test class', async () => {
+      const coreSource = join(workspace, root, 'core/src/test/java/demo/core/GreeterTest.java');
+      const original = readFileSync(coreSource, 'utf8');
+      const directory = join(workspace, root, 'app/src/test/java/demo/core');
+      const appSource = join(directory, 'GreeterTest.java');
+      const appPom = join(workspace, root, 'app/pom.xml');
+      const originalPom = readFileSync(appPom, 'utf8');
+      mkdirSync(directory, { recursive: true });
+      try {
+        writeFileSync(coreSource, original.replace(/}\s*$/, '@org.junit.Test public void scopedMethod() { org.junit.Assert.fail("dependency test executed"); } }'));
+        writeFileSync(appPom, originalPom.replace('</dependencies>', '<dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency></dependencies>'));
+        writeFileSync(appSource, 'package demo.core; public class GreeterTest { @org.junit.Test public void scopedMethod() { org.junit.Assert.assertTrue(true); } }');
+        const app = model.projects.find(value => value.name === 'app');
+        const plan = build('build.testPlan', planned({ project: app, selectorKind: 'java.test.fullName',
+          selectors: ['demo.core.GreeterTest#scopedMethod()'], userArguments: ['-Dtest=*', '-DskipTests=false'] })).plan;
+        const result = await send(plan, 'exact-project-test');
+        assert.equal(result.exitCode, 0, result.output);
+        assert.deepEqual(result.testResults.tests.map(value => [value.project, value.suite, value.case]),
+          [['nested/app', 'demo.core.GreeterTest', 'scopedMethod']]);
+      } finally { writeFileSync(coreSource, original); writeFileSync(appPom, originalPom); rmSync(appSource, { force: true }); }
+    });
     await report.step('an unknown method cannot pass with a fresh empty Surefire report', async () => {
       const plan = build('build.testPlan', planned({ project, suite: 'demo.core.GreeterTest', case: 'doesNotExist', userArguments: [] })).plan;
       await assert.rejects(send(plan, 'unknown-test'), /no fresh result/);
+    });
+    await report.step('custom Surefire directories and a failing method return only fresh inline reports', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      writeFileSync(pom, original.replace('</project>', `<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId><configuration><reportsDirectory>\${project.build.directory}/custom reports</reportsDirectory></configuration>
+        </plugin></plugins></build></project>`));
+      const failure = join(directory, 'src/test/java/demo/core/FailureTest.java');
+      writeFileSync(failure, 'package demo.core; public class FailureTest { @org.junit.Test public void failsForReport() { org.junit.Assert.fail("expected report failure"); } }');
+      const plan = build('build.testPlan', planned({ project, suite: 'demo.core.FailureTest', case: 'failsForReport', userArguments: [] })).plan;
+      const result = await send(plan, 'failing-custom-report');
+      assert.notEqual(result.exitCode, 0, result.output);
+      assert.ok(existsSync(join(directory, 'target/custom reports/TEST-demo.core.FailureTest.xml')));
+      const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+        projects: model.projects.map(value => value.path), result: result.testResults }).results;
+      assert.equal(decoded.summary.total, 1, JSON.stringify(decoded));
+      assert.equal(decoded.summary.failed, 1, JSON.stringify(decoded));
+      assert.equal(decoded.tests[0].project, 'nested/core');
+      assert.equal(decoded.tests[0].case, 'failsForReport');
+      assert.match(decoded.tests[0].message, /expected report failure/);
+      assert.deepEqual((await (await import('node:fs/promises')).readdir(join(scratch, 'state'))).filter(name => name.startsWith('execution-')), []);
+      rmSync(failure);
+      writeFileSync(pom, original);
+    });
+    await report.step('verify retains Failsafe failures alongside fresh Surefire results', async () => {
+      const directory = join(workspace, root, 'core');
+      const pom = join(directory, 'pom.xml');
+      const original = readFileSync(pom, 'utf8');
+      const integration = join(directory, 'src/test/java/demo/core/FailureIT.java');
+      try {
+        writeFileSync(pom, original.replace('</project>', `<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId><version>3.5.2</version>
+          <configuration><reportsDirectory>\${project.build.directory}/integration reports</reportsDirectory></configuration>
+          <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+          </plugin></plugins></build></project>`));
+        writeFileSync(integration, 'package demo.core; public class FailureIT { @org.junit.Test public void failsInIntegration() { org.junit.Assert.fail("expected Failsafe failure"); } }');
+        // Clean removes the preceding failing class after its source was removed.
+        // Maven owns both phases; the host must not merge stale report directories.
+        const plan = build('build.taskPlan', planned({ task: 'goal', project, userArguments: ['clean', 'verify'] })).plan;
+        const result = await send(plan, 'failsafe-verify');
+        assert.notEqual(result.exitCode, 0, result.output);
+        assert.ok(existsSync(join(directory, 'target/integration reports/TEST-demo.core.FailureIT.xml')));
+        const decoded = build('build.decodeTestResults', { workspaceRoot: workspace, root, project: project.path,
+          projects: model.projects.map(value => value.path), result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 3, JSON.stringify(decoded));
+        assert.equal(decoded.summary.passed, 2, JSON.stringify(decoded));
+        assert.equal(decoded.summary.failed, 1, JSON.stringify(decoded));
+        assert.ok(decoded.tests.every(test => test.project === 'nested/core'));
+        const failed = decoded.tests.find(test => test.case === 'failsInIntegration');
+        assert.equal(failed?.status, 'failed');
+        assert.match(failed.message, /expected Failsafe failure/);
+        assert.deepEqual((await (await import('node:fs/promises')).readdir(join(scratch, 'state'))).filter(name => name.startsWith('execution-')), []);
+      } finally {
+        rmSync(integration, { force: true });
+        writeFileSync(pom, original);
+      }
+    });
+    await report.step('current Maven framework target launches only its module with reactor classes, exact argv and application cwd', async () => {
+      const directory = join(workspace, 'framework reactor');
+      const cwd = join(workspace, 'framework cwd');
+      mkdirSync(cwd);
+      cpSync(resolve('test/fixtures/reactor'), directory, { recursive: true });
+      const version = 'run-' + process.pid + '-' + Date.now();
+      for (const module of ['', 'app', 'core']) {
+        const pom = join(directory, module, 'pom.xml');
+        writeFileSync(pom, readFileSync(pom, 'utf8').replaceAll('1.0.0-SNAPSHOT', version));
+      }
+      const appPom = join(directory, 'app/pom.xml');
+      const original = readFileSync(appPom, 'utf8');
+      writeFileSync(appPom, original.replace('</project>', `<build><plugins><plugin><groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId><version>2.2.2.RELEASE</version>
+        <configuration><jvmArguments>-Dlithe.pom=preserved</jvmArguments></configuration></plugin></plugins></build></project>`));
+      writeFileSync(join(directory, 'app/src/main/java/demo/app/Main.java'), `package demo.app;
+        import demo.core.Greeter;
+        public final class Main { public static void main(String[] args) throws Exception {
+          System.out.println(new Greeter().greet(System.getenv("LITHE_RUN_VALUE")));
+          System.out.println("PROP="+System.getProperty("lithe.message"));
+          System.out.println("POMFLAG="+System.getProperty("lithe.pom"));
+          System.out.println("CWD="+new java.io.File(".").getCanonicalPath());
+          for (String arg : args) System.out.println("ARG="+java.util.Base64.getEncoder().encodeToString(arg.getBytes("UTF-8")));
+        } }`);
+      const selectedRoot = 'framework reactor';
+      const readModel = async () => build('build.decodeModel', { workspaceRoot: workspace, root: selectedRoot,
+        result: await send(build('build.modelPlan', planned({ root: selectedRoot })).plan, 'framework-launch-model') }).model;
+      const current = await readModel();
+      const app = current.projects.find(value => value.name === 'app');
+      const target = current.targets.find(value => value.projectID === app.id && value.name === 'spring-boot.maven');
+      assert.ok(target, 'the effective plugin publishes a typed service target');
+      const launchOptions = { execution: 'service', runtimeArguments: ['-Dlithe.message=hello world'],
+        arguments: ['a b', '雪', 'C:\\literal', 'comma,value', 'double"quote', "single'quote"],
+        environment: { LITHE_RUN_VALUE: 'Provider' }, workingDirectory: 'framework cwd', entrypoint: 'demo.app.Main' };
+      const request = extra => planned({ root: selectedRoot, workspaceRoot: workspace, run: 'framework',
+        project: { name: app.name, path: app.path }, target: { name: target.name, path: target.path, tags: target.tags }, launchOptions, ...extra });
+      const prepared = await send(build('build.prepareRunPlan', request({})).plan, 'framework-launch');
+      const launch = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions, result: prepared }).launch;
+      assert.deepEqual(launch.executable, { kind: 'toolchain', value: 'project-maven' });
+      assert.equal(launch.workingDirectory, 'framework cwd');
+      const transcript = join(scratch, 'framework-launch.log');
+      const descriptor = openSync(transcript, 'w');
+      try {
+        await runCommand(maven, launch.arguments, { cwd, env: { ...process.env, ...launch.environment },
+          stdio: ['ignore', descriptor, descriptor], signal, timeoutMs: mavenTimeout() });
+      } finally { closeSync(descriptor); }
+      const output = readFileSync(transcript, 'utf8');
+      assert.ok(output.includes('Hello, Provider'), output);
+      assert.ok(output.includes('PROP=hello world'), output);
+      assert.ok(output.includes('CWD=' + cwd), output);
+      for (const argument of launchOptions.arguments) assert.ok(output.includes('ARG=' + Buffer.from(argument).toString('base64')), output);
+      // The standard JDI connector proves a real suspended JVM is reachable;
+      // no second implementation of JDWP or Maven launch semantics is involved.
+      const allocator = createServer(), allocation = new AbortController();
+      const port = await bounded(new Promise((resolve, reject) => {
+        allocator.once('error', reject);
+        allocator.listen({ port: 0, host: '127.0.0.1', signal: allocation.signal }, () => { const port = allocator.address().port; allocator.close(error => error ? reject(error) : resolve(port)); });
+      }), 'allocate loopback debug port', 5000).finally(() => allocation.abort());
+      const debugOptions = { ...launchOptions, runtimeArguments: [], debug: { runtime: 'jvm', port } };
+      const debugResult = await send(build('build.prepareRunPlan', request({ launchOptions: debugOptions })).plan, 'framework-debug');
+      const debugPlan = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions: debugOptions, result: debugResult }).launch;
+      const helper = join(scratch, 'ResumeJvm.java');
+      writeFileSync(helper, `import com.sun.jdi.*; import com.sun.jdi.connect.*; import java.util.*;
+        public class ResumeJvm { public static void main(String[] args) throws Exception {
+          AttachingConnector connector = Bootstrap.virtualMachineManager().attachingConnectors().stream()
+            .filter(value -> value.name().equals("com.sun.jdi.SocketAttach")).findFirst().get();
+          Map<String, Connector.Argument> options = connector.defaultArguments();
+          options.get("hostname").setValue("127.0.0.1"); options.get("port").setValue(args[0]); options.get("timeout").setValue("5000");
+          VirtualMachine vm = connector.attach(options); try { vm.resume(); } finally { try { vm.dispose(); } catch (VMDisconnectedException exited) {} }
+        } }`);
+      const java = process.env.LITHE_TEST_JAVA ?? 'java';
+      const javac = java.includes('/') ? join(resolve(java, '..'), 'javac') : 'javac';
+      // JDI lives in tools.jar on Java 8, including at javac time. Resolve it
+      // from the selected helper JDK, not Maven's potentially different JAVA_HOME.
+      const tools = join(java.includes('/') ? resolve(java, '../..') : process.env.JAVA_HOME ?? '', 'lib/tools.jar');
+      await runCommand(javac, [...(existsSync(tools) ? ['-cp', tools] : []), helper], { signal, timeoutMs: 10000 });
+      let debugOutput = '', ready;
+      const listening = new Promise(resolve => { ready = resolve; });
+      const controller = new AbortController(), abort = () => controller.abort(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      const running = runCommand(maven, debugPlan.arguments, { cwd, env: { ...process.env, ...debugPlan.environment },
+        signal: controller.signal, timeoutMs: mavenTimeout(), onOutput: chunk => {
+          debugOutput = (debugOutput + chunk).slice(-100000);
+          if (debugOutput.includes('Listening for transport dt_socket at address: ' + port)) ready();
+        } });
+      try {
+        await bounded(Promise.race([listening, running.then(() => { throw new Error('JVM exited before the debug listener: ' + debugOutput); })]), 'suspended framework JVM', 20000);
+        assert.ok(!debugOutput.includes('Hello, Provider'), 'the application must be suspended before attachment');
+        await runCommand(java, ['-cp', scratch + (existsSync(tools) ? delimiter + tools : ''), 'ResumeJvm', String(port)], { signal, timeoutMs: 10000 });
+        await running;
+        assert.ok(debugOutput.includes('Hello, Provider') && debugOutput.includes('POMFLAG=preserved'), debugOutput);
+      } finally {
+        signal.removeEventListener('abort', abort); controller.abort();
+        await running.catch(() => {});
+      }
+      assert.ok(!output.includes('spring-boot-maven-plugin:2.2.2.RELEASE:run (default-cli) on project reactor'), output);
+      await assert.rejects(send(build('build.prepareRunPlan', request({ launchOptions: { ...launchOptions, arguments: [''] } })).plan, 'framework-empty'), /preserve empty/);
+      const moduleTarget = current.targets.find(value => value.projectID === app.id && value.name === 'maven.module');
+      const moduleOptions = { execution: 'task', runtimeArguments: [], arguments: ['validate', '-Dcustom.value=two words'], environment: {} };
+      const moduleRequest = request({ run: 'module', target: { name: moduleTarget.name, path: moduleTarget.path, tags: moduleTarget.tags }, launchOptions: moduleOptions });
+      const modulePlan = await send(build('build.prepareRunPlan', moduleRequest).plan, 'module-prepare');
+      assert.equal(modulePlan.arguments.at(-1), '-Dcustom.value=two words');
+      assert.equal(modulePlan.arguments.at(-2), 'validate');
+      for (const argument of ['--file=../outside.xml', '-Pother', '-s', '-Dmaven.repo.local=/other', '-Dlithe.run.goal=other']) {
+        await assert.rejects(send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: { ...moduleOptions, arguments: ['validate', argument] } }).plan,
+          'module-selection-override'), /build options/);
+      }
+      writeFileSync(appPom, original);
+      await assert.rejects(send(build('build.prepareRunPlan', request({})).plan, 'removed-framework'), /absent from the current/);
     });
     await report.step('publish the same normalized Maven facts and effective options to a declared consumer', () => {
       const consumer = JSON.parse(JSON.stringify(manifest));
       consumer.id = 'org.example.maven-input-consumer';
       consumer.requires.buildProviders = 6;
       delete consumer.buildSystems[0].modelSharing;
+      delete consumer.buildSystems[0].run;
+      delete consumer.buildSystems[0].configuration;
+      delete consumer.buildSystems[0].test.results;
+      delete consumer.buildSystems[0].test.selectorKinds;
       consumer.buildSystems[0].modelInputs = [{ pluginID: id, buildSystemID: 'maven' }];
       const snapshot = coreCommand('build.resolveModelInputs', { manifest: consumer, buildSystemID: 'maven', request: { revision: 11,
         sources: [{ manifest, instances: [{ buildSystemID: 'maven', root, state: 'ready', model, options }] }] } }).modelInputs;
@@ -101,6 +478,26 @@ await withInterrupts(async (signal) => {
       assert.equal(facts.options.settingsFile, undefined);
       const plan = coreCommand('build.modelPlan', { manifest: consumer, buildSystemID: 'maven', request: planned({ modelInputs: snapshot }) }).plan;
       assert.deepEqual(plan.provider.params.modelInputs, snapshot);
+    });
+    await report.step('a module opened as the workspace retains the dot project identity', async () => {
+      const module = join(workspace, root, 'core');
+      const standalone = new BackendClient({ java: process.env.LITHE_TEST_JAVA ?? 'java', jar: join(pkg, 'lib/lithe-maven-backend.jar'),
+        state: join(scratch, 'module-state'), timeoutMs: mavenTimeout() });
+      try {
+        await standalone.initialize(module, [9]);
+        const plan = build('build.testPlan', { root: '.', options: {}, project: { name: 'core', path: '.' },
+          selectorKind: 'java.test.fullName', selectors: ['demo.core.GreeterTest#greetsByName()'] }).plan;
+        const result = await standalone.request(plan.provider.method, { ...plan.provider.params,
+          tool: { executable: maven }, operationID: 'module-workspace-test' });
+        assert.equal(result.exitCode, 0, result.output);
+        const decoded = build('build.decodeTestResults', { workspaceRoot: module, root: '.', project: '.', result: result.testResults }).results;
+        assert.equal(decoded.summary.total, 1);
+        assert.equal(decoded.tests[0].project, '.');
+        assert.equal(decoded.tests[0].case, 'greetsByName');
+      } finally {
+        standalone.kill();
+        await bounded(standalone.exited, 'module backend cleanup');
+      }
     });
     await report.step('close the backend and preserve the entire plugin package', async () => {
       assert.equal(await client.close(), 0);
