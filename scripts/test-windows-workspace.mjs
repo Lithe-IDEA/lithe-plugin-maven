@@ -1,10 +1,10 @@
 // The Windows TypeScript workflow, production Maven Provider and current Core.
 // Runs on macOS/Linux; native Windows launch/process acceptance is separate.
 import assert from 'node:assert/strict';
-import { closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BackendClient, bounded } from './backend-client.mjs';
 import { coreCommand } from './core-client.mjs';
@@ -25,7 +25,7 @@ const workspacePath = join(scratch, 'workspace'), state = join(scratch, 'state')
 mkdirSync(workspacePath); cpSync(new URL('../test/fixtures/reactor', import.meta.url), join(workspacePath, root), { recursive: true });
 const instance = { pluginID: manifest.id, buildSystemID: 'maven', root, options: { profiles: ['ci'] } };
 const report = createReport('windows-provider-workspace');
-let client, workspace, model;
+let client, workspace, model, scopedTool;
 await withInterrupts(async signal => {
   const stop = () => client?.kill(); signal.addEventListener('abort', stop, { once: true });
   try {
@@ -35,9 +35,13 @@ await withInterrupts(async signal => {
     workspace = new WindowsBuildProviderWorkspace(workspacePath, {
       translate: createTranslator('en-US'),
       core: async (command, manifest, buildSystemID, request, workspaceRoot) => coreCommand(command, { manifest, buildSystemID, workspaceRoot, request }),
-      tools: async () => ({ manifest, pluginDirectory: pkg, workspaceStateDirectory: state,
-        tool: { executable: process.env.LITHE_TEST_MAVEN }, executesProjectCode: false,
-        environment: { JAVA_HOME: javaHome, PATH: join(javaHome, 'bin') + delimiter + process.env.PATH } }),
+      tools: async (_target, instanceRoot, _check, configurationId) => {
+        const selected = configurationId ? coreCommand('runConfig.projectToolchain', { root: workspacePath, path: instanceRoot, configurationId }, null).toolchain : {};
+        const home = selected.mavenJavaHomePath || selected.javaHomePath || javaHome;
+        return { manifest, pluginDirectory: pkg, workspaceStateDirectory: state,
+          tool: { executable: selected.mavenExecutablePath || process.env.LITHE_TEST_MAVEN }, executesProjectCode: false,
+          environment: { JAVA_HOME: home, PATH: join(home, 'bin') + delimiter + process.env.PATH } };
+      },
       guard: () => () => {},
       // Test-only native I/O port: private XML is hashed here, never returned to
       // the production TypeScript workflow or sent back over Provider RPC.
@@ -142,6 +146,54 @@ await withInterrupts(async signal => {
       const result = await workspace.dependencies(instance, project.id).completion;
       assert.equal(result.dependencies.project, project.path);
       assert.ok(result.dependencies.dependencies.some(dependency => dependency.name === 'junit'));
+    });
+    await report.step('Windows per-Run Profiles use a private real model and preserve the default model and options', async () => {
+      const project = model.projects.find(project => project.name === 'core'), defaults = structuredClone(workspace.model(instance));
+      const prepared = await workspace.prepareConfigurationRun(instance, { provider: 'maven.module', projectPath: project.path,
+        optionOverrides: { profiles: [], skipTests: false },
+        launchOptions: { execution: 'task', runtimeArguments: [], arguments: ['compile'], environment: {} } }).completion;
+      assert.ok(prepared.launch.arguments.includes('compile'));
+      assert.equal(prepared.languageImport.kind, 'maven');
+      assert.deepEqual(prepared.languageImport.mavenContext.profiles, []);
+      // False contributes no option; the optional public import field may be absent.
+      assert.equal(prepared.languageImport.mavenContext.skipTests ?? false, false);
+      assert.ok(!prepared.launch.arguments.includes('-DskipTests'));
+      await prepared.validate();
+      assert.deepEqual(workspace.model(instance), defaults); assert.deepEqual(instance.options, { profiles: ['ci'] });
+    });
+    await report.step('a configuration-owned private Run model preserves explicit Maven selection and leaves the shared backend alive', async () => {
+      const project = model.projects.find(project => project.path === root), defaults = structuredClone(workspace.model(instance));
+      const target = model.targets.find(target => target.projectID === project.id && target.name === 'maven.module');
+      assert.ok(target);
+      const scopedTool = join(scratch, 'selected Run Maven'); symlinkSync(process.env.LITHE_TEST_MAVEN, scopedTool);
+      const local = join(workspacePath, '.lithe/run/local.json'), original = existsSync(local) ? readFileSync(local) : undefined;
+      mkdirSync(dirname(local), { recursive: true });
+      // An explicit saved selector makes this test workspace readable without
+      // an in-memory detector layer; the ordinary module entry uses real Core merge.
+      writeFileSync(local, JSON.stringify({ version: 2, configurations: [
+        { id: 'user:anchor', name: 'Saved task', provider: 'build.provider', execution: 'task', extensions: { build: {
+          pluginID: manifest.id, buildSystemID: 'maven', root, run: 'module', projectID: project.id, targetID: target.id, execution: 'task', userArguments: ['compile'] } } },
+        { id: 'user:scoped', name: 'Scoped module', provider: 'maven.module', execution: 'task', cwd: root, args: ['compile'],
+          toolchains: { java: 'project-jdk', maven: 'project-maven' }, extensions: { maven: { module: '.', skipTests: false },
+            java: { mavenExecutablePath: scopedTool, mavenJavaHomePath: javaHome } } },
+      ] }));
+      let scope;
+      try {
+        const input = coreCommand('runConfig.providerLaunchInputs', { root: workspacePath, configurationId: 'user:scoped', providerRoot: root }, null);
+        scope = workspace.createRunScope(instance, input, 'user:scoped');
+        await scope.domain.loadModel(scope.instance, scope.requiredOptions).completion;
+        const prepared = await scope.domain.prepareConfigurationRun(scope.instance, input).completion;
+        assert.equal(prepared.tool.tool.executable, scopedTool);
+        assert.equal(prepared.languageImport.mavenContext.mavenExecutablePath, scopedTool);
+        assert.deepEqual(prepared.languageImport.mavenContext.profiles, ['ci']);
+        await prepared.validate();
+        assert.deepEqual(workspace.model(instance), defaults); assert.deepEqual(instance.options, { profiles: ['ci'] });
+      } finally {
+        try { await scope?.dispose(); }
+        finally { if (original) writeFileSync(local, original); else rmSync(local, { force: true }); }
+      }
+      assert.equal(client.child.exitCode, null, 'the backend is still owned by the main workspace');
+      assert.deepEqual(workspace.model(instance), defaults);
     });
     await report.step('Windows executes a current model plugin goal without reconstructing its Maven command', async () => {
       const project = model.projects.find(project => project.name === 'core');
