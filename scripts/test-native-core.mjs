@@ -99,7 +99,7 @@ await withInterrupts(async (signal) => {
 
         writeFileSync(pom, '<broken><maven.compiler.release>99</maven.compiler.release>');
         const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
-          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, build: { pluginID: id, buildSystemID: "maven", root, projectID: project.id },
             minimumJavaVersion: version(project), contentRoots: [] })) }, null);
         assert.equal(generated.toolchainRequirements.toolchains['project-jdk'].minimumVersion, '23');
       } finally { writeFileSync(pom, original); writeFileSync(modulePom, originalModule); }
@@ -118,7 +118,7 @@ await withInterrupts(async (signal) => {
         assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === '3.9.9'), 'native properties ignore comments and unescape the URL');
         writeFileSync(properties, 'distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\n');
         const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
-          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
+          projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, build: { pluginID: id, buildSystemID: "maven", root, projectID: project.id },
             contentRoots: [] })) }, null);
         assert.equal(generated.toolchainRequirements.toolchains['project-maven'], undefined, 'Run generation never interprets provider-owned Wrapper or version facts');
         writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https://example.invalid/custom.zip\n');
@@ -153,7 +153,7 @@ await withInterrupts(async (signal) => {
         const active = await read(['framework']);
         assert.equal(active.projects.find(project => project.name === 'reactor').properties['run.provider'], undefined, 'aggregators are not services');
         assert.ok(active.projects.filter(project => project.name !== 'reactor').every(project => project.properties['run.provider'] === 'quarkus.maven'), 'Maven applies the inherited active Profile');
-        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root, contentRoots: [] }));
+        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, build: { pluginID: id, buildSystemID: "maven", root, projectID: project.id }, contentRoots: [] }));
         const runs = active.projects.flatMap(project => manifest.buildSystems[0].run.flatMap(declaration => active.targets
           .filter(target => target.projectID === project.id && declaration.fromTargets.tags.some(tag => target.tags.includes(tag)))
           .map(target => ({ projectPath: project.path, name: project.name, reference: { pluginID: manifest.id, buildSystemID: 'maven', root,
