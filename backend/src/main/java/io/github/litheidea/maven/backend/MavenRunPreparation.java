@@ -51,8 +51,11 @@ final class MavenRunPreparation {
             addArguments(arguments, "arguments", programArguments);
             if (options.containsKey("debug")) {
                 Map<String, Object> debug = Json.object(options.get("debug"));
-                Object port = debug.get("port");
-                if (debug.size() != 2 || !"jvm".equals(debug.get("runtime")) || !(port instanceof Number)
+                Map<String, Object> connection = Json.object(debug.get("target"));
+                Object port = connection.get("port");
+                if (debug.size() != 3 || !"java".equals(debug.get("configurationType"))
+                        || connection.size() != 3 || !"connection".equals(connection.get("kind"))
+                        || !"127.0.0.1".equals(connection.get("host")) || !(port instanceof Number)
                         || ((Number) port).doubleValue() != ((Number) port).longValue()
                         || ((Number) port).longValue() < 1 || ((Number) port).longValue() > 65535) throw invalid("Select a valid JVM debug port.");
                 arguments.add("-Dlithe.run.debugPort=" + ((Number) port).longValue());

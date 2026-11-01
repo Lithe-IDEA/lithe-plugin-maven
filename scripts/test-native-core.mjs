@@ -410,7 +410,7 @@ await withInterrupts(async (signal) => {
         allocator.once('error', reject);
         allocator.listen({ port: 0, host: '127.0.0.1', signal: allocation.signal }, () => { const port = allocator.address().port; allocator.close(error => error ? reject(error) : resolve(port)); });
       }), 'allocate loopback debug port', 5000).finally(() => allocation.abort());
-      const debugOptions = { ...launchOptions, runtimeArguments: [], debug: { runtime: 'jvm', port } };
+      const debugOptions = { ...launchOptions, runtimeArguments: [], debug: { adapterID: 'dev.lithe.plugin.java-support/java', configurationType: 'java', target: { kind: 'connection', host: '127.0.0.1', port } } };
       const debugResult = await send(build('build.prepareRunPlan', request({ launchOptions: debugOptions })).plan, 'framework-debug');
       const debugPlan = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions: debugOptions, result: debugResult }).launch;
       const helper = join(scratch, 'ResumeJvm.java');

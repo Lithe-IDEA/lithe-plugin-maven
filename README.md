@@ -307,7 +307,9 @@ Wrapper 元数据 `maven.wrapper` / `maven.minimumVersion` 来自所选 reactor 
 参与准备时的有效模型读取。开发组合可用 `scripts/package-development.mjs`
 及 `scripts/test-native-core.mjs` 验证；正式 SDK 锁定和发行条件保持不变。
 
-开发协议 11 的 JVM 调试由宿主选择本机端口，后端按当前 Mojo 描述符设置回环监听和
+开发协议 11 在清单声明公开 `configurationType: java`，由宿主从当前调试注册表选择
+适配器并传递身份和本机 connection 目标；Maven 不引用其他插件的语言服务器。
+后端按当前 Mojo 描述符设置回环监听和
 启动前暂停。参数绑定同时识别 Maven 的 `property` 与 `defaultValue` 表达式，例如
 Quarkus 的 `jvm.args` 属于后者。Spring Boot 保留已有 JVM 参数，Quarkus/Micronaut
 使用框架自带的调试开关；遇到重复 JDWP 或不兼容描述符明确拒绝。

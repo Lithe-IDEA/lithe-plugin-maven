@@ -33,6 +33,7 @@
       "run": [
         {
           "id": "framework",
+          "debug": {"configurationType": "java"},
           "source": "provider",
           "name": "Run Maven service",
           "execution": "service",

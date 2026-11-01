@@ -127,7 +127,7 @@ await withInterrupts(async signal => {
         assert.ok(target, `${fixture.name} must publish its real effective target`);
         const port = await unusedPort();
         const launchOptions = { execution: 'service', runtimeArguments: [], arguments: ['a b', '雪'],
-          environment: { LITHE_RUN_VALUE: 'Provider' }, debug: { runtime: 'jvm', port } };
+          environment: { LITHE_RUN_VALUE: 'Provider' }, debug: { adapterID: 'dev.lithe.plugin.java-support/java', configurationType: 'java', target: { kind: 'connection', host: '127.0.0.1', port } } };
         const prepared = await send(plan('build.prepareRunPlan', planned({ workspaceRoot: workspace, run: 'framework',
           project: { name: app.name, path: app.path }, target: { name: target.name, path: target.path, tags: target.tags }, launchOptions })).plan);
         const launch = plan('build.decodeRunPreparation', { workspaceRoot: workspace, root, launchOptions, result: prepared }).launch;
