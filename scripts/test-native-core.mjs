@@ -154,13 +154,18 @@ await withInterrupts(async (signal) => {
         const active = await read(['framework']);
         assert.equal(active.projects.find(project => project.name === 'reactor').properties['run.provider'], undefined, 'aggregators are not services');
         assert.ok(active.projects.filter(project => project.name !== 'reactor').every(project => project.properties['run.provider'] === 'quarkus.maven'), 'Maven applies the inherited active Profile');
-        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
-          mavenRunProvider: project.properties['run.provider'], contentRoots: [] }));
+        const ownership = active.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root, contentRoots: [] }));
+        const runs = active.projects.flatMap(project => manifest.buildSystems[0].run.flatMap(declaration => active.targets
+          .filter(target => target.projectID === project.id && declaration.fromTargets.tags.some(tag => target.tags.includes(tag)))
+          .map(target => ({ projectPath: project.path, name: project.name, reference: { pluginID: manifest.id, buildSystemID: 'maven', root,
+            run: declaration.id, projectID: project.id, targetID: target.id, execution: declaration.execution, userArguments: [] } }))));
         writeFileSync(pom, '<deliberately-broken-after-Maven-returned-the-model>');
-        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [], diagnostics: [] }, projectOwnership: ownership }, null);
-        assert.deepEqual(generated.generated.configurations.map(item => item.id).sort(), ['quarkus.maven:nested/app', 'quarkus.maven:nested/core']);
+        const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [], diagnostics: [] }, projectOwnership: ownership, providerRuns: runs }, null);
+        assert.equal(generated.generated.configurations.length, runs.length);
+        const services = generated.generated.configurations.filter(item => item.execution === 'service');
+        assert.deepEqual(services.map(item => item.extensions.build.projectID).sort(), active.projects.filter(project => project.name !== 'reactor').map(project => project.id).sort());
         for (const item of generated.generated.configurations) {
-          assert.equal(item.cwd, root); assert.equal(item.execution, 'service');
+          assert.equal(item.cwd, root); assert.equal(item.provider, 'build.provider'); assert.equal(item.extensions.maven, undefined);
         }
       } finally { writeFileSync(pom, original); }
     });
@@ -362,6 +367,8 @@ await withInterrupts(async (signal) => {
         const pom = join(directory, module, 'pom.xml');
         writeFileSync(pom, readFileSync(pom, 'utf8').replaceAll('1.0.0-SNAPSHOT', version));
       }
+      const reactorPom = join(directory, 'pom.xml');
+      writeFileSync(reactorPom, readFileSync(reactorPom, 'utf8').replace('<build>', '<build><defaultGoal>validate</defaultGoal>'));
       const appPom = join(directory, 'app/pom.xml');
       const original = readFileSync(appPom, 'utf8');
       writeFileSync(appPom, original.replace('</project>', `<build><plugins><plugin><groupId>org.springframework.boot</groupId>
@@ -455,6 +462,11 @@ await withInterrupts(async (signal) => {
       const modulePlan = await send(build('build.prepareRunPlan', moduleRequest).plan, 'module-prepare');
       assert.equal(modulePlan.arguments.at(-1), '-Dcustom.value=two words');
       assert.equal(modulePlan.arguments.at(-2), 'validate');
+      await assert.rejects(send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: { ...moduleOptions, runtimeArguments: ['-Dsaved=value'] } }).plan, 'module-runtime-choice'), /do not accept/);
+      await assert.rejects(send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: { ...moduleOptions, entrypoint: 'opaque/entry' } }).plan, 'module-entry-choice'), /do not accept/);
+      const defaultOptions = { ...moduleOptions, arguments: [] };
+      const defaultPlan = await send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: defaultOptions }).plan, 'module-default-goal');
+      await runCommand(maven, defaultPlan.arguments, { cwd: directory, env: { ...process.env, ...defaultPlan.environment }, signal, timeoutMs: mavenTimeout() });
       for (const argument of ['--file=../outside.xml', '-Pother', '-s', '-Dmaven.repo.local=/other', '-Dlithe.run.goal=other']) {
         await assert.rejects(send(build('build.prepareRunPlan', { ...moduleRequest, launchOptions: { ...moduleOptions, arguments: ['validate', argument] } }).plan,
           'module-selection-override'), /build options/);

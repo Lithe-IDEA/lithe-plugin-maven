@@ -173,9 +173,9 @@ await withInterrupts(async signal => {
       writeFileSync(local, JSON.stringify({ version: 2, configurations: [
         { id: 'user:anchor', name: 'Saved task', provider: 'build.provider', execution: 'task', extensions: { build: {
           pluginID: manifest.id, buildSystemID: 'maven', root, run: 'module', projectID: project.id, targetID: target.id, execution: 'task', userArguments: ['compile'] } } },
-        { id: 'user:scoped', name: 'Scoped module', provider: 'maven.module', execution: 'task', cwd: root, args: ['compile'],
-          toolchains: { java: 'project-jdk', maven: 'project-maven' }, extensions: { maven: { module: '.', skipTests: false },
-            java: { mavenExecutablePath: scopedTool, mavenJavaHomePath: javaHome } } },
+        { id: 'user:scoped', name: 'Scoped module', provider: 'build.provider', execution: 'task', cwd: root, args: ['compile'],
+          extensions: { build: { pluginID: manifest.id, buildSystemID: 'maven', root, run: 'module', projectID: project.id, targetID: target.id, execution: 'task' },
+            'build-run': { options: { skipTests: false } }, java: { mavenExecutablePath: scopedTool, mavenJavaHomePath: javaHome } } },
       ] }));
       let scope;
       try {

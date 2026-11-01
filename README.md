@@ -2,7 +2,7 @@
 
 为 [Lithe](https://github.com/1lck/Lithe-IDEA) 提供 Maven 项目支持：识别 `pom.xml`，在 Maven 工具窗口里列出
 模块、生命周期和插件目标，运行任务和测试，查看依赖树。
-这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 7`）实现，
+这是一个**社区插件**，用 Lithe 的构建系统接口（插件 API 3 的 `buildSystems` 和 `buildProviders: 11`）实现，
 除了下面说的 Maven 扩展 jar 和读取项目用的 Java 后端，没有任何宿主代码。
 
 > English: Maven support for Lithe through the declarative `buildSystems` plugin API — project tree, lifecycle and
@@ -25,6 +25,7 @@
 | 诊断 | 把编译输出中的 `[ERROR]`/`[WARNING] 文件:[行,列]` 显示为问题 |
 | 依赖 | 按模块显示依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析；一次 Maven 运行读出全部模块，展开模块不再各跑一次 |
 | 快照 | 项目和依赖保存在工作区状态目录，重新打开项目时直接显示；POM、`.mvn/` 配置、settings.xml、选项或 Maven/Java 变化后才重新运行 Maven，Reload 总是重新运行 |
+| 运行配置 | 框架服务保留运行时参数、程序参数与目录；模块任务把目标列表直接交给 Maven，空列表使用 Maven 自己的 defaultGoal 或无目标错误，不补造默认目标；模块任务不接受应用运行时参数或入口，明确报告不支持 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
 
 ## 依赖的程序

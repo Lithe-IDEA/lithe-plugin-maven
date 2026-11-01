@@ -73,7 +73,7 @@ final class MavenRunPreparation {
         } else {
             if (options.containsKey("debug")) throw invalid("Select a framework service to debug; arbitrary Maven goals have no JVM debug target.");
             if (!runtimeArguments.isEmpty() || options.containsKey("entrypoint")) throw invalid("Maven module goals do not accept application runtime or entrypoint options.");
-            if (programArguments.isEmpty()) throw invalid("A Maven module run needs one or more goals.");
+            // An empty list delegates defaultGoal (or Maven's own no-goal error) to Maven.
             modelArguments(params); // The same checked properties were supplied to the model read.
             arguments.addAll(programArguments);
         }
