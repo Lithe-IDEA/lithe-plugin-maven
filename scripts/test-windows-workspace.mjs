@@ -133,7 +133,7 @@ await withInterrupts(async signal => {
       const defaults = structuredClone(workspace.model(instance));
       const prepared = await workspace.prepareRun(instance, { run: run.id, projectID: project.id, targetID: target.id,
         launchOptions: { execution: 'task', runtimeArguments: [], arguments: ['compile'], environment: {}, workingDirectory: root } }).completion;
-      assert.deepEqual(prepared.launch.executable, { kind: 'toolchain', value: 'project-maven' });
+      assert.deepEqual(prepared.launch.executable, { kind: 'toolchain', value: 'io.github.lithe-idea.maven-build:maven' });
       assert.ok(prepared.launch.arguments.includes('compile'));
       assert.equal(prepared.languageImport.kind, 'maven');
       assert.equal(prepared.languageImport.mavenContext.mavenExecutablePath, process.env.LITHE_TEST_MAVEN);

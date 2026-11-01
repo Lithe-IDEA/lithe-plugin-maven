@@ -81,7 +81,7 @@ final class MavenRunPreparation {
         if (params.get("environment") instanceof Map) environment.putAll(Json.object(params.get("environment")));
         environment.putAll(Json.object(options.get("environment")));
         Map<String, Object> result = new LinkedHashMap<>();
-        Map<String, Object> executable = new LinkedHashMap<>(); executable.put("kind", "toolchain"); executable.put("value", "project-maven");
+        Map<String, Object> executable = new LinkedHashMap<>(); executable.put("kind", "toolchain"); executable.put("value", "io.github.lithe-idea.maven-build:maven");
         result.put("executable", executable); result.put("arguments", arguments); result.put("workingDirectory", cwd); result.put("environment", environment);
         return result;
     }

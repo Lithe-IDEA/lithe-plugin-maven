@@ -336,3 +336,16 @@ TypeScript 工作区编排，连接真实 Provider 和 `LITHE_CORE_LIBRARY` 指�
 运行，不需要安装宿主前端依赖，也不修改正式 SDK 锁定。它不代替 Windows 原生工具发现、
 Job Object 进程清理、Build UI、配置和 Run 消费者迁移；固定提交的开发 CI 在 runner
 Maven 组合执行该测试。
+
+### Fixed tool-definition integration
+
+The Stage D development combination uses the host toolchain foundation pinned at
+`b87c7f60dd80f851695d7052b5287a5c93c7fa46`. Maven contributes
+`io.github.lithe-idea.maven-build:maven` through `toolDefinitions: 1` and selects
+it through `executableResolution: 2`. Its Java prerequisite selects the official
+Java Support definition `java`; the backend bootstrap remains independent.
+Directory pins and project wrappers are resolved by the host's common resolver,
+with declared layouts, version probes and environment exports. A community
+package does not claim the official short Maven ID or add a host-specific JDK
+resolver. Run generation does not consume Maven Wrapper/version ownership fields.
+This remains a development-only combination; published SDK locks are unchanged.

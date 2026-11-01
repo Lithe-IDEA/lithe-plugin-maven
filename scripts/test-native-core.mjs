@@ -119,9 +119,8 @@ await withInterrupts(async (signal) => {
         writeFileSync(properties, 'distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\n');
         const generated = coreCommand('runConfig.generate', { root: workspace, paths: [], javaEntrypoints: { schemaVersion: 1, entries: [] },
           projectOwnership: current.projects.map(project => ({ path: project.path, name: project.name, mavenReactorPath: root,
-            mavenMinimumVersion: project.properties['maven.minimumVersion'], mavenWrapper: root + '/' + project.properties['maven.wrapper'], contentRoots: [] })) }, null);
-        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].minimumVersion, '3.9.9');
-        assert.equal(generated.toolchainRequirements.toolchains['project-maven'].wrapper, 'nested/mvnw');
+            contentRoots: [] })) }, null);
+        assert.equal(generated.toolchainRequirements.toolchains['project-maven'], undefined, 'Run generation never interprets provider-owned Wrapper or version facts');
         writeFileSync(properties, '# distributionUrl=https://example.invalid/apache-maven-99.0.0-bin.zip\ndistributionUrl=https://example.invalid/custom.zip\n');
         current = await read();
         assert.ok(current.projects.every(project => project.properties['maven.minimumVersion'] === undefined), 'unrecognized distribution stays unknown');
@@ -397,7 +396,7 @@ await withInterrupts(async (signal) => {
         project: { name: app.name, path: app.path }, target: { name: target.name, path: target.path, tags: target.tags }, launchOptions, ...extra });
       const prepared = await send(build('build.prepareRunPlan', request({})).plan, 'framework-launch');
       const launch = build('build.decodeRunPreparation', { workspaceRoot: workspace, root: selectedRoot, launchOptions, result: prepared }).launch;
-      assert.deepEqual(launch.executable, { kind: 'toolchain', value: 'project-maven' });
+      assert.deepEqual(launch.executable, { kind: 'toolchain', value: 'io.github.lithe-idea.maven-build:maven' });
       assert.equal(launch.workingDirectory, 'framework cwd');
       const transcript = join(scratch, 'framework-launch.log');
       const descriptor = openSync(transcript, 'w');
@@ -477,6 +476,8 @@ await withInterrupts(async (signal) => {
     await report.step('publish the same normalized Maven facts and effective options to a declared consumer', () => {
       const consumer = JSON.parse(JSON.stringify(manifest));
       consumer.id = 'org.example.maven-input-consumer';
+      delete consumer.toolDefinitions;
+      delete consumer.requires.toolDefinitions;
       consumer.requires.buildProviders = 6;
       delete consumer.buildSystems[0].modelSharing;
       delete consumer.buildSystems[0].run;
