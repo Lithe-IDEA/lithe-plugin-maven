@@ -132,8 +132,18 @@ jobs:
             17
       - name: Build the explicit development SDK and isolated plugin package
         run: |
-          mvn -B -ntp -q -f .artifacts/sdk-source/sdk/java/pom.xml -DskipTests package
-          node scripts/package-development.mjs --sdk-jar "$GITHUB_WORKSPACE/.artifacts/sdk-source/sdk/java/plugin-sdk/target/lithe-plugin-sdk-java-0.1.0.jar"
+          mvn -B -ntp -q -f .artifacts/sdk-source/sdk/java/pom.xml -DskipTests clean package
+          # The fixed source revision owns its SDK version. A clean build must
+          # produce exactly one regular SDK JAR; never reuse a stale older JAR.
+          SDK_JAR=$(node --input-type=module -e '
+            import {readdirSync,lstatSync} from "node:fs";
+            import {join} from "node:path";
+            const directory=process.argv[1];
+            const jars=readdirSync(directory).filter(name=>/^lithe-plugin-sdk-java-[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?\.jar$/.test(name));
+            if(jars.length!==1 || !lstatSync(join(directory,jars[0])).isFile()) throw Error("Expected one freshly built SDK JAR");
+            process.stdout.write(join(directory,jars[0]));
+          ' "$GITHUB_WORKSPACE/.artifacts/sdk-source/sdk/java/plugin-sdk/target")
+          node scripts/package-development.mjs --sdk-jar "$SDK_JAR"
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const p=JSON.parse(readFileSync(".artifacts/native-development/latest.json")); if(p.developmentOnly!==true) throw Error("Expected a development package"); appendFileSync(process.env.GITHUB_ENV, `LITHE_TEST_PACKAGE=${p.package}\n`);'
       - name: Check process cleanup
         run: node scripts/test-process.mjs
