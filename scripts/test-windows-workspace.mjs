@@ -18,6 +18,10 @@ if (!process.env.LITHE_TEST_MAVEN || !process.env.LITHE_TEST_JAVA) throw new Err
 const { WindowsBuildProviderWorkspace } = await import(pathToFileURL(join(resolve(process.env.LITHE_HOST_SOURCE),
   'windows/tauri/src/features/build/services/build-provider-workspace.ts')).href);
 const { createTranslator } = await import(pathToFileURL(join(resolve(process.env.LITHE_HOST_SOURCE), 'windows/tauri/src/i18n/locale.ts')).href);
+const { BuildWorkspaceController } = await import(pathToFileURL(join(resolve(process.env.LITHE_HOST_SOURCE),
+  'windows/tauri/src/features/build/services/build-workspace-controller.ts')).href);
+const { IdeBuildCapabilities } = await import(pathToFileURL(join(resolve(process.env.LITHE_HOST_SOURCE),
+  'windows/tauri/src/features/host-api/ide-build-capabilities.ts')).href);
 const pkg = resolve(process.env.LITHE_TEST_PACKAGE ?? 'dist/package/io.github.lithe-idea.maven-build');
 const manifest = JSON.parse(readFileSync(join(pkg, 'plugin.json'), 'utf8')), before = bundleManifest(pkg);
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'lithe-windows-maven-'))), root = 'nested';
@@ -25,7 +29,16 @@ const workspacePath = join(scratch, 'workspace'), state = join(scratch, 'state')
 mkdirSync(workspacePath); cpSync(new URL('../test/fixtures/reactor', import.meta.url), join(workspacePath, root), { recursive: true });
 const instance = { pluginID: manifest.id, buildSystemID: 'maven', root, options: { profiles: ['ci'] } };
 const report = createReport('windows-provider-workspace');
-let client, workspace, model, scopedTool;
+let client, workspace, controller, model, scopedTool;
+const waitForProduct = async (ready, description) => {
+  let unsubscribe;
+  try {
+    await bounded(new Promise(resolve => {
+      const check = () => { if (ready()) resolve(); };
+      unsubscribe = workspace.subscribe(check); check();
+    }), description, mavenTimeout());
+  } finally { unsubscribe?.(); }
+};
 await withInterrupts(async signal => {
   const stop = () => client?.kill(); signal.addEventListener('abort', stop, { once: true });
   try {
@@ -203,6 +216,56 @@ await withInterrupts(async signal => {
       const result = await workspace.executeModelTask(instance, task.id).completion;
       assert.equal(result.exitCode, 0, result.output);
     });
+    await report.step('Windows Agent reads the admitted catalog without starting tooling or reusing a model with different options', async () => {
+      const core = async (command, manifest, buildSystemID, request, workspaceRoot) => coreCommand(command, { manifest, buildSystemID, workspaceRoot, request });
+      controller = new BuildWorkspaceController(workspacePath, { domain: workspace, guard: () => () => {},
+        detect: async () => ({ ...coreCommand('build.detect', { workspaceRoot: workspacePath,
+          plugins: [{ manifest }], options: { maven: instance.options } }), plugins: [{ manifest }], document: { version: 1, systems: {} } }) });
+      const agent = new IdeBuildCapabilities(() => controller, () => signal.throwIfAborted(), core);
+      const count = requests.length;
+      const inspected = await agent.call('lithe_build_inspect', {});
+      const entry = inspected.instances.find(entry => entry.root === root);
+      assert.ok(entry); assert.equal(entry.modelState, 'unavailable');
+      assert.deepEqual(entry.projects, [], 'the earlier manually supplied options are not a catalog-owned model');
+      assert.equal(requests.length, count, 'inspect reuses current model and never starts tooling');
+      assert.deepEqual(instance.options, { profiles: ['ci'] });
+    });
+    await report.step('Windows Agent executes an exact real model task and reads its product-owned output', async () => {
+      const agent = new IdeBuildCapabilities(() => controller, () => signal.throwIfAborted(),
+        async (command, manifest, buildSystemID, request, workspaceRoot) => coreCommand(command, { manifest, buildSystemID, workspaceRoot, request }));
+      const entry = controller.snapshot().entries.find(entry => entry.root === root);
+      assert.equal((await agent.call('lithe_build_reload', { instanceID: entry.id })).reloadRequested, true);
+      await waitForProduct(() => workspace.hasCurrentModel(entry) || workspace.operationSummaries().some(operation => operation.phase === 'failed'),
+        'Agent current model reload');
+      const inspected = await agent.call('lithe_build_inspect', {});
+      assert.equal(inspected.instances.find(item => item.instanceID === entry.id).modelState, 'ready');
+      model = workspace.model(entry);
+      assert.deepEqual(model.projects.map(project => project.name).sort(), ['app', 'core', 'reactor']);
+      // Later direct regression steps continue with the catalog's complete
+      // effective options, never with the former hand-written partial input.
+      instance.options = structuredClone(entry.options);
+      const project = model.projects.find(project => project.name === 'core');
+      const task = model.tasks.find(task => task.projectID === project.id &&
+        task.properties.goal?.includes(':maven-compiler-plugin:') && task.properties.goal.endsWith(':compile'));
+      assert.ok(task);
+      const refused = await agent.call('lithe_build_execute', { instanceID: entry.id, taskID: task.template,
+        projectID: 'another-project', modelTaskID: task.id });
+      assert.equal(refused.error.code, 'NOT_FOUND');
+      const started = await agent.call('lithe_build_execute', { instanceID: entry.id, taskID: task.template,
+        projectID: project.id, modelTaskID: task.id, userArguments: [] });
+      assert.equal(started.ok, undefined, JSON.stringify(started));
+      const id = started.operationID.slice('build:'.length);
+      assert.equal(controller.snapshot().operationID, id, 'Agent and Build output use the same slot');
+      await waitForProduct(() => {
+        const record = workspace.operationSummary(id);
+        return record && !['preparing', 'running'].includes(record.phase);
+      }, 'Agent product-owned build completion');
+      assert.equal(workspace.operationSummary(id).exitCode, 0, agent.output(id)?.output);
+      assert.equal(agent.operations().find(operation => operation.operationID === started.operationID).state, 'completed');
+      assert.equal(agent.output(id).output, workspace.operation(id).output);
+      assert.equal(agent.stop('expired-operation'), false);
+      assert.equal(client.child.exitCode, null, 'the original backend remains workspace-owned');
+    });
     await report.step('Windows forwards the exact JDT selector and retains only the selected method report', async () => {
       const project = model.projects.find(project => project.name === 'core');
       const result = await workspace.executeTests(instance, { projectID: project.id, selectorKind: 'java.test.fullName',
@@ -228,14 +291,14 @@ await withInterrupts(async signal => {
         'Surefire owns the detailed assertion message even when Maven uses quiet output');
     });
     await report.step('workspace cleanup reaps its backend and preserves package bytes', async () => {
-      await workspace.dispose();
+      await controller.dispose();
       assert.notEqual(client.child.exitCode, null);
       assert.deepEqual(bundleManifest(pkg), before);
       assert.throws(() => workspace.loadModel(instance), /inputs changed/);
     });
   } finally {
     signal.removeEventListener('abort', stop);
-    try { if (workspace) await workspace.dispose(); else if (client) await client.close(); }
+    try { if (controller) await controller.dispose(); else if (workspace) await workspace.dispose(); else if (client) await client.close(); }
     finally { client?.kill(); if (client) await bounded(client.exited, 'Windows integration backend cleanup'); rmSync(scratch, { recursive: true, force: true }); report.write(); }
   }
 });
