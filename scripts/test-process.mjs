@@ -56,6 +56,16 @@ await withInterrupts(async (signal) => {
   };
 
   try {
+    await check("streamed output preserves UTF-8 and a failing consumer reaps its command", async () => {
+      let output = "";
+      await runCommand(process.execPath, ["-e", "process.stdout.write('雪');process.stderr.write('stderr')"], {
+        onOutput: chunk => { output += chunk; }, timeoutMs: 2000,
+      });
+      assert.ok(output.includes("雪") && output.includes("stderr"));
+      await assert.rejects(runCommand(process.execPath, ["-e", "process.stdout.write('ready');setInterval(()=>{},1000)"], {
+        onOutput: () => { throw new Error("consumer rejected output"); }, timeoutMs: 2000,
+      }), /consumer rejected output/);
+    });
     await check("success and nonzero exit preserve status, cwd, and command diagnostics", async () => {
       const listeners = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
       await runCommand(process.execPath, ["-e", "process.exit(0)"], { cwd: scratch, stdio: "ignore", timeoutMs: 2_000 });

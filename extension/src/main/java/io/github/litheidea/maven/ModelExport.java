@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.lifecycle.internal.LifecycleExecutionPlanCalculator;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.model.PluginExecution;
 import org.apache.maven.model.Profile;
@@ -40,12 +41,14 @@ final class ModelExport {
 
     private final MavenSession session;
     private final MavenPluginManager pluginManager;
+    private final LifecycleExecutionPlanCalculator executionPlans;
     private final PluginVersionResolver versionResolver;
     /** Goals by plugin coordinates, so each descriptor is read once per run. */
     private final Map<String, Goals> goalsByPlugin = new LinkedHashMap<>();
 
-    ModelExport(MavenSession session, MavenPluginManager pluginManager, PluginVersionResolver versionResolver) {
+    ModelExport(MavenSession session, MavenPluginManager pluginManager, PluginVersionResolver versionResolver, LifecycleExecutionPlanCalculator executionPlans) {
         this.session = session;
+        this.executionPlans = executionPlans;
         this.pluginManager = pluginManager;
         this.versionResolver = versionResolver;
     }
@@ -54,7 +57,10 @@ final class ModelExport {
         List<Object> projects = new ArrayList<>();
         List<Object> tasks = new ArrayList<>();
         List<Object> contentRoots = new ArrayList<>();
+        List<Object> targets = new ArrayList<>();
         Map<String, File> aggregators = aggregators();
+        Map<String, Object> wrapper = new LinkedHashMap<>();
+        WrapperRequirements.add(session, wrapper);
         for (MavenProject project : session.getProjects()) {
             String path = path(project.getBasedir());
             Map<String, Object> entry = new LinkedHashMap<>();
@@ -73,6 +79,22 @@ final class ModelExport {
             properties.put("artifactId", project.getArtifactId());
             properties.put("version", project.getVersion());
             properties.put("packaging", project.getPackaging());
+            properties.put("run.modelVersion", "1");
+            properties.putAll(wrapper);
+            String minimumJava = CompilerRequirements.minimumJava(session, project, executionPlans);
+            if (minimumJava != null) properties.put("java.minimumVersion", minimumJava);
+            FrameworkLaunch framework = FrameworkLaunch.find(project);
+            if (framework != null) {
+                properties.put("run.provider", framework.provider);
+                properties.put("run.goal", goals(project, framework.plugin).coordinates + ":" + framework.goal);
+                properties.put("run.runtimeArgumentsProperty", framework.runtimeProperty);
+                properties.put("run.argumentsProperty", framework.argumentsProperty);
+                if (framework.entrypointProperty != null) properties.put("run.entrypointProperty", framework.entrypointProperty);
+                properties.put("run.preparationVersion", "1");
+                if ("spring-boot.maven".equals(framework.provider)) properties.put("run.workingDirectoryParameter", "workingDirectory");
+                addTarget(targets, path, framework.provider, "maven-service", properties);
+            }
+            addTarget(targets, path, "maven.module", "maven-module", properties);
             entry.put("properties", properties);
             projects.add(entry);
             if (!"pom".equals(project.getPackaging())) {
@@ -87,6 +109,7 @@ final class ModelExport {
         document.put("version", 1);
         document.put("projects", projects);
         document.put("tasks", tasks);
+        document.put("targets", targets);
         document.put("contentRoots", contentRoots);
         document.put("optionValues", optionValues);
         return document;
@@ -110,6 +133,17 @@ final class ModelExport {
             }
         }
         return result;
+    }
+
+    /** Effective build plugins include active profiles and inherited plugins.
+     * Plugin management alone does not apply a plugin. Coordinate precedence
+     * preserves the host's existing service identity if several are applied.
+     */
+    private static void addTarget(List<Object> targets, String project, String name, String tag, Map<String, Object> properties) {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("project", project); target.put("path", project); target.put("name", name);
+        target.put("tags", Collections.singletonList(tag)); target.put("properties", new LinkedHashMap<>(properties));
+        targets.add(target);
     }
 
     private void addContentRoots(MavenProject project, String owner, List<Object> roots) {

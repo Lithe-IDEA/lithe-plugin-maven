@@ -78,7 +78,7 @@ async function test(signal) {
       state: join(scratch, "state"),
       timeoutMs,
     });
-    await report.step("start the build provider", () => backend.initialize(root, [3]));
+    await report.step("start the build provider", () => backend.initialize(root, [8]));
     const params = (extra = {}) => ({
       buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
       tool: { executable: mavenExecutable() }, ...extra,
@@ -97,6 +97,8 @@ async function test(signal) {
         artifactId: "app",
         version: "1.0.0-SNAPSHOT",
         packaging: "jar",
+        "run.modelVersion": "1",
+        "java.minimumVersion": "8",
       });
     });
 
@@ -150,7 +152,7 @@ async function test(signal) {
 
     await check("one Maven model run serves every tree and leaves a reusable snapshot", async () => {
       const saved = JSON.parse(readFileSync(join(scratch, "state", "maven-snapshot.json"), "utf8")).value;
-      assert.equal(saved.snapshotVersion, 1);
+      assert.equal(saved.snapshotVersion, 2);
       assert.deepEqual(saved.roots[root].model, model);
       // The provider remains alive for the native task/test requests below.
     });
@@ -165,8 +167,11 @@ async function test(signal) {
       const result = await backend.request("lithe/build/test", params({ project: { name: "core", path: "core" },
         suite: "demo.core.GreeterTest", userArguments: [], operationID: "test-suite" }));
       assert.equal(result.exitCode, 0, result.output);
+      assert.equal(result.testResults.format, "litheTestResults");
+      assert.equal(result.testResults.tests.length, 2);
+      assert.ok(result.testResults.tests.every(test => test.project === "core" && test.status === "passed"));
     });
-    await check("a filtered test run writes the report the results glob reads", () => {
+    await check("the upstream reports remain in the project while the host consumes the inline document", () => {
       const report = readFileSync(join(root, "core", "target", "surefire-reports", "TEST-demo.core.GreeterTest.xml"), "utf8");
       assert.match(report, /<testsuite[^>]*name="demo\.core\.GreeterTest"[^>]*tests="2"/);
     });

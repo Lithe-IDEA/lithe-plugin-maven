@@ -7,8 +7,10 @@
 //   { "exit": <status> }   print an [ERROR] line and exit with the status
 //   { "output": "missing" | "malformed" }  succeed without the documents, or with invalid JSON
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, relative } from "node:path";
 
 const configuration = existsSync(process.env.FAKE_MAVEN_CONTROL ?? "")
   ? JSON.parse(readFileSync(process.env.FAKE_MAVEN_CONTROL, "utf8"))
@@ -46,16 +48,36 @@ if (!exporting) {
   console.log("[WARNING] " + join(process.cwd(), "core/src/main/java/demo/core/Greeter.java") + ":[1,1] test diagnostic");
   const selector = argv.find(argument => argument.startsWith("-Dtest="))?.slice(7);
   if (selector && !control.noReport) {
-    const [selectedSuite, method = "greets"] = selector.split("#");
+    const quoted = /^%regex\[\\Q(.+?)\\E(?:#\\Q(.+?)\\E.*?)?\]$/.exec(selector);
+    const [selectedSuite, method = "greets"] = quoted
+      ? [quoted[1].replace(/\.class$/, '').replaceAll('/', '.'), quoted[2]]
+      : selector.split("#");
     const suite = control.reportSuite ?? selectedSuite;
     const directory = join(process.cwd(), "core/target/surefire-reports");
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "TEST-" + suite + ".xml"), `<testsuite><testcase classname="${suite}" name="${method}"/></testsuite>`);
+    const xml = control.badReport === 'broken' ? '<broken' : control.badReport === 'external-entity'
+      ? '<!DOCTYPE testsuite [<!ENTITY external SYSTEM "file:///fixture/must-not-open">]><testsuite name="x"><testcase classname="x" name="y">&external;</testcase></testsuite>'
+      : `<testsuite name="${suite}"><testcase classname="${suite}" name="${method}"/></testsuite>`;
+    writeFileSync(join(directory, "TEST-" + suite + ".xml"), xml);
+    if (value("lithe.reportOutput")) {
+      const file = join(dirname(value("lithe.reportOutput")), 'report-0.xml');
+      writeFileSync(file, xml);
+      writeFileSync(value("lithe.reportOutput"), JSON.stringify({ format: 'litheMavenOperationReports', version: 1,
+        reports: [{ file: 'report-0.xml', project: control.reportProject ?? relative(value("lithe.reportWorkspace"), join(process.cwd(), 'core')),
+          sha256: createHash('sha256').update(xml).digest('hex') }] }));
+    }
   }
   if (control.flood) await new Promise((done, reject) => process.stdout.write("x".repeat(9 * 1024 * 1024), error => error ? reject(error) : done()));
   process.exit(0);
 }
 if (!modelOutput || !dependenciesOutput) throw new Error("expected both output properties");
+const configurationOutput = value("lithe.configurationContextOutput");
+if (!configurationOutput) throw new Error("expected the native configuration context");
+const nativeSource = process.env.FAKE_MAVEN_NATIVE_SOURCE ?? join(process.cwd(), ".mvn", "selected settings.xml");
+writeFileSync(configurationOutput, JSON.stringify({ format: "litheMavenNativeInputs", version: 1,
+  sources: [{ uri: pathToFileURL(nativeSource).href,
+    revision: existsSync(nativeSource) ? "sha256:" + createHash("sha256").update(readFileSync(nativeSource)).digest("hex") : "missing" }] }));
+
 if (control.output === "missing") process.exit(0);
 if (control.output === "malformed") {
   writeFileSync(modelOutput, "{invalid JSON");

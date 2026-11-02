@@ -10,6 +10,10 @@ on:
         description: 'Exact lithe-plugin-docs commit for development-only Java 8 validation'
         required: true
         type: string
+      core-revision:
+        description: 'Optional exact Lithe commit for current native configuration and Core workflows'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -128,8 +132,18 @@ jobs:
             17
       - name: Build the explicit development SDK and isolated plugin package
         run: |
-          mvn -B -ntp -q -f .artifacts/sdk-source/sdk/java/pom.xml -DskipTests package
-          node scripts/package-development.mjs --sdk-jar "$GITHUB_WORKSPACE/.artifacts/sdk-source/sdk/java/plugin-sdk/target/lithe-plugin-sdk-java-0.1.0.jar"
+          mvn -B -ntp -q -f .artifacts/sdk-source/sdk/java/pom.xml -DskipTests clean package
+          # The fixed source revision owns its SDK version. A clean build must
+          # produce exactly one regular SDK JAR; never reuse a stale older JAR.
+          SDK_JAR=$(node --input-type=module -e '
+            import {readdirSync,lstatSync} from "node:fs";
+            import {join} from "node:path";
+            const directory=process.argv[1];
+            const jars=readdirSync(directory).filter(name=>/^lithe-plugin-sdk-java-[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?\.jar$/.test(name));
+            if(jars.length!==1 || !lstatSync(join(directory,jars[0])).isFile()) throw Error("Expected one freshly built SDK JAR");
+            process.stdout.write(join(directory,jars[0]));
+          ' "$GITHUB_WORKSPACE/.artifacts/sdk-source/sdk/java/plugin-sdk/target")
+          node scripts/package-development.mjs --sdk-jar "$SDK_JAR"
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const p=JSON.parse(readFileSync(".artifacts/native-development/latest.json")); if(p.developmentOnly!==true) throw Error("Expected a development package"); appendFileSync(process.env.GITHUB_ENV, `LITHE_TEST_PACKAGE=${p.package}\n`);'
       - name: Check process cleanup
         run: node scripts/test-process.mjs
@@ -153,6 +167,54 @@ jobs:
         env:
           LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
         run: node scripts/test.mjs
+      - name: Require a fixed Core revision when selected
+        if: inputs.core-revision != ''
+        env:
+          CORE_REVISION: ${{ inputs.core-revision }}
+        run: '[[ "$CORE_REVISION" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        if: inputs.core-revision != ''
+        with:
+          repository: 1lck/Lithe-IDEA
+          ref: ${{ inputs.core-revision }}
+          path: .artifacts/core-source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.core-revision != ''
+      - name: Build the selected host Core and verify real native settings
+        if: inputs.core-revision != ''
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+        run: |
+          cargo build --locked --manifest-path .artifacts/core-source/rust/Cargo.toml -p lithe-core --lib
+          export LITHE_CORE_LIBRARY="$GITHUB_WORKSPACE/.artifacts/core-source/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="${MVN:-$(command -v mvn)}"
+          node scripts/test-configuration.mjs
+          node scripts/test-native-core.mjs
+      - uses: oven-sh/setup-bun@v2
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        with:
+          bun-version-file: .artifacts/core-source/windows/tauri/package.json
+      - name: Verify the Windows workflow with the real Provider and selected Core
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        env:
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
+        run: |
+          export LITHE_HOST_SOURCE="$GITHUB_WORKSPACE/.artifacts/core-source"
+          export LITHE_CORE_LIBRARY="$LITHE_HOST_SOURCE/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="$(command -v mvn)"
+          bun scripts/test-windows-workspace.mjs
+      - name: Verify Quarkus and Micronaut suspended JVMs with standard JDI
+        if: inputs.core-revision != '' && matrix.maven == 'runner'
+        env:
+          # These pinned framework versions require Java 17 and modern Maven;
+          # the Java 8 / Maven 3.6.3 Provider lane above remains independent.
+          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_17_X64 }}/bin/java
+          LITHE_MAVEN_TIMEOUT_MS: 300000
+        run: |
+          export LITHE_CORE_LIBRARY="$GITHUB_WORKSPACE/.artifacts/core-source/rust/target/debug/liblithe_core.so"
+          export LITHE_TEST_MAVEN="$(command -v mvn)"
+          node scripts/test-framework-debug.mjs
       - name: Prove the release inputs stayed unchanged
         run: |
           git diff --exit-code -- sdk.lock.json backend/pom.xml extension/pom.xml io.github.lithe-idea.maven-build

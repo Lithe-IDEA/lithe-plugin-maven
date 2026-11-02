@@ -38,11 +38,15 @@ final class MavenRuns {
     static final class Loaded {
         private final Map<String, Object> model;
         private final Map<String, Object> dependencies;
+        private final List<Object> nativeSources;
 
-        Loaded(Map<String, Object> model, Map<String, Object> dependencies) {
+        Loaded(Map<String, Object> model, Map<String, Object> dependencies, List<Object> nativeSources) {
             this.model = model;
             this.dependencies = dependencies;
+            this.nativeSources = nativeSources;
         }
+
+        List<Object> nativeSources() { return nativeSources; }
 
         Map<String, Object> model() {
             return model;
@@ -148,6 +152,7 @@ final class MavenRuns {
     private void fly(Flight flight, Inputs inputs, String before) {
         try {
             Loaded loaded = run(inputs, flight.cancellation);
+            if (!NativeSources.current(loaded.nativeSources())) throw NativeSources.changed();
             if (snapshots != null) {
                 if (before.equals(Fingerprint.of(inputs))) {
                     snapshots.write(inputs.root, before, loaded);
@@ -172,6 +177,7 @@ final class MavenRuns {
         try {
             Path model = work.resolve("model.json");
             Path dependencies = work.resolve("dependencies.json");
+            Path configuration = work.resolve("configuration.json");
             List<String> command = new ArrayList<>();
             command.add(inputs.maven.toString());
             command.add("-B");
@@ -179,6 +185,7 @@ final class MavenRuns {
             command.addAll(inputs.optionArguments);
             command.add("-Dmaven.ext.class.path=" + inputs.extensionJar);
             command.add("-Dlithe.modelOutput=" + model);
+            command.add("-Dlithe.configurationContextOutput=" + configuration);
             // No lithe.dependenciesProject: every module's tree, in the same run.
             command.add("-Dlithe.dependenciesOutput=" + dependencies);
             command.add("pre-clean");
@@ -196,7 +203,8 @@ final class MavenRuns {
                 throw new PluginError("maven.loadFailed", "Maven could not read the project (exit status "
                         + result.exitCode() + ")." + (output.isEmpty() ? "" : "\n" + output));
             }
-            return new Loaded(document(model, "model"), document(dependencies, "dependency tree"));
+            return new Loaded(document(model, "model"), document(dependencies, "dependency tree"),
+                    NativeSources.fromDocument(document(configuration, "native configuration sources")));
         } finally {
             delete(work);
         }

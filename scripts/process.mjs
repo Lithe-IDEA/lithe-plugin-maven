@@ -22,6 +22,7 @@ export function mavenTimeout() {
 export function runCommand(command, args, {
   cwd = process.cwd(), env = process.env, stdio = "inherit", timeoutMs = MAVEN_TIMEOUT_MS,
   graceMs = GRACE_MS, killWaitMs = KILL_WAIT_MS, signal,
+  onOutput,
 } = {}) {
   for (const [name, value] of Object.entries({ timeoutMs, graceMs, killWaitMs })) {
     if (!Number.isSafeInteger(value) || value < 1 || value > 3_600_000) {
@@ -34,7 +35,7 @@ export function runCommand(command, args, {
   const invocation = [command, ...args].map((arg) => JSON.stringify(arg)).join(" ");
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio, detached: true, shell: false });
+    const child = spawn(command, args, { cwd, env, stdio: onOutput ? ["ignore", "pipe", "pipe"] : stdio, detached: true, shell: false });
     let closed = false;
     let code;
     let exitSignal;
@@ -102,6 +103,13 @@ export function runCommand(command, args, {
       failure ??= diagnostic(`command timed out (limit ${timeoutMs} ms)`);
       stop();
     }, timeoutMs);
+    if (onOutput) for (const stream of [child.stdout, child.stderr]) {
+      stream.setEncoding("utf8");
+      stream.on("data", chunk => {
+        try { onOutput(chunk); }
+        catch (error) { failure ??= diagnostic(`output consumer failed: ${error.message}`); stop(); }
+      });
+    }
     child.once("error", (error) => {
       failure ??= diagnostic(`cannot run command: ${error.message}`);
       stop();

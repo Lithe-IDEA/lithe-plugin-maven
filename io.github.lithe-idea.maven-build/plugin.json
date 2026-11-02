@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "0.1.1",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 3, "buildModelInputs": 1, "buildSystems": 1, "serverProcess": 1 },
+  "requires": { "buildProviders": 11, "buildModelInputs": 1, "buildSystems": 4, "executableResolution": 2, "toolDefinitions": 1, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
@@ -13,6 +13,150 @@
   "permissions": ["languageServer.launch", "process.build"],
   "activationEvents": ["onBuildSystem:maven"],
   "languages": [],
+  "toolDefinitions": [
+    {
+      "id": "io.github.lithe-idea.maven-build:maven",
+      "displayName": "Maven",
+      "icon": {
+        "path": "icons/maven.svg"
+      },
+      "executableLayouts": [
+        {
+          "path": "bin/mvn",
+          "platforms": [
+            "macos",
+            "linux"
+          ]
+        },
+        {
+          "path": "bin/mvn.cmd",
+          "platforms": [
+            "windows"
+          ]
+        }
+      ],
+      "executables": [
+        {
+          "id": "pinned",
+          "kind": "setting",
+          "settingID": "executable",
+          "layer": "project"
+        },
+        {
+          "id": "wrapper",
+          "kind": "projectFile",
+          "path": "mvnw",
+          "requires": [
+            ".mvn/wrapper/maven-wrapper.properties"
+          ],
+          "platforms": [
+            "macos",
+            "linux"
+          ]
+        },
+        {
+          "id": "wrapper-windows",
+          "kind": "projectFile",
+          "path": "mvnw.cmd",
+          "requires": [
+            ".mvn/wrapper/maven-wrapper.properties"
+          ],
+          "platforms": [
+            "windows"
+          ]
+        },
+        {
+          "id": "project-request",
+          "kind": "toolchain",
+          "scope": "project"
+        },
+        {
+          "id": "default",
+          "kind": "setting",
+          "settingID": "executable",
+          "layer": "global"
+        },
+        {
+          "id": "global-request",
+          "kind": "toolchain",
+          "scope": "global"
+        },
+        {
+          "id": "home",
+          "kind": "environment",
+          "variable": "MAVEN_HOME",
+          "path": "bin/mvn",
+          "platforms": [
+            "macos",
+            "linux"
+          ]
+        },
+        {
+          "id": "home-windows",
+          "kind": "environment",
+          "variable": "MAVEN_HOME",
+          "path": "bin/mvn.cmd",
+          "platforms": [
+            "windows"
+          ]
+        },
+        {
+          "id": "shell",
+          "kind": "command",
+          "command": "mvn"
+        },
+        {
+          "id": "installed",
+          "kind": "toolchain",
+          "scope": "installed"
+        }
+      ],
+      "version": {
+        "arguments": [
+          "--version"
+        ],
+        "pattern": "Apache Maven (\\d+(?:\\.\\d+)*)"
+      },
+      "homeVariable": "MAVEN_HOME",
+      "commands": [
+        "mvn"
+      ],
+      "wrappers": [
+        {
+          "path": "mvnw",
+          "requires": [
+            ".mvn/wrapper/maven-wrapper.properties"
+          ],
+          "platforms": [
+            "macos",
+            "linux"
+          ]
+        },
+        {
+          "path": "mvnw.cmd",
+          "requires": [
+            ".mvn/wrapper/maven-wrapper.properties"
+          ],
+          "platforms": [
+            "windows"
+          ]
+        }
+      ],
+      "exports": [
+        {
+          "name": "MAVEN_HOME",
+          "value": "${home}"
+        }
+      ],
+      "pathPrepend": [
+        "${home}/bin"
+      ],
+      "launch": [
+        "${executable}",
+        "${arguments}"
+      ]
+    }
+  ],
   "buildSystems": [
     {
       "id": "maven",
@@ -23,50 +167,59 @@
         "nesting": "outermost"
       },
       "invocation": {
-        "executables": [
-          {
-            "kind": "projectFile",
-            "path": "mvnw",
-            "requires": [".mvn/wrapper/maven-wrapper.properties"],
-            "platforms": ["macos", "linux"]
-          },
-          {
-            "kind": "projectFile",
-            "path": "mvnw.cmd",
-            "requires": [".mvn/wrapper/maven-wrapper.properties"],
-            "platforms": ["windows"]
-          },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn", "platforms": ["macos", "linux"] },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn.cmd", "platforms": ["windows"] },
-          { "kind": "command", "command": "mvn" }
-        ],
-        "environmentInputs": ["MAVEN_HOME"],
-        "runtimeDependencies": [{ "id": "java", "minimumVersion": "8" }],
+        "executables": [{ "kind": "toolchain", "toolchainID": "io.github.lithe-idea.maven-build:maven" }],
+        "runtimeDependencies": [{ "id": "java", "minimumVersion": "8",
+          "executables": [{ "kind": "toolchain", "toolchainID": "java" }] }],
         "globalArguments": [],
         "version": { "arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)" },
         "minimumVersion": "3.6.3"
       },
+      "run": [
+        {
+          "id": "framework",
+          "debug": {"configurationType": "java"},
+          "source": "provider",
+          "name": "Run Maven service",
+          "execution": "service",
+          "fromTargets": {
+            "tags": [
+              "maven-service"
+            ]
+          }
+        },
+        {
+          "id": "module",
+          "source": "provider",
+          "name": "Run Maven goals",
+          "execution": "task",
+          "fromTargets": {
+            "tags": [
+              "maven-module"
+            ]
+          }
+        }
+      ],
       "options": [
         {
           "id": "profiles",
           "displayName": "Profiles",
-          "kind": "multiSelect",
+          "kind": "multiSelect", "scope": "instance",
           "choicesFromModel": true,
           "allowCustom": true,
           "presentation": "tree",
           "arguments": ["-P", "${value}"]
         },
-        { "id": "settingsFile", "displayName": "Settings File", "kind": "file", "arguments": ["-s", "${value}"] },
+        { "id": "settingsFile", "displayName": "Settings File", "kind": "file", "scope": "instance", "arguments": ["-s", "${value}"] },
         {
           "id": "localRepository",
           "displayName": "Local Repository",
-          "kind": "directory",
+          "kind": "directory", "scope": "instance",
           "arguments": ["-Dmaven.repo.local=${value}"]
         },
         {
           "id": "offline",
           "displayName": "Offline",
-          "kind": "boolean",
+          "kind": "boolean", "scope": "instance",
           "presentation": "toolbar",
           "icon": { "path": "icons/offline.svg" },
           "arguments": ["-o"]
@@ -74,7 +227,7 @@
         {
           "id": "skipTests",
           "displayName": "Skip Tests",
-          "kind": "boolean",
+          "kind": "boolean", "scope": "instance",
           "presentation": "toolbar",
           "icon": { "path": "icons/skipTests.svg" },
           "arguments": ["-DskipTests"]
@@ -92,8 +245,29 @@
         "mayUseNetwork": true
       },
       "model": { "source": "provider" },
+      "configuration": { "source": "provider" },
       "modelSharing": { "options": ["profiles", "offline", "skipTests"] },
       "tasks": [
+        {
+          "id": "java-prepare-run-main",
+          "preparation": { "purpose": "run", "sourceRoles": ["source", "generatedSource", "resource"] },
+          "displayName": "resources:resources",
+          "group": "build",
+          "category": ["Lifecycle"],
+          "scopes": ["project"],
+          "source": "provider",
+          "arguments": []
+        },
+        {
+          "id": "java-prepare-run-test",
+          "preparation": { "purpose": "run", "sourceRoles": ["testSource", "generatedTestSource", "testResource"] },
+          "displayName": "resources:resources + resources:testResources",
+          "group": "build",
+          "category": ["Lifecycle"],
+          "scopes": ["project"],
+          "source": "provider",
+          "arguments": []
+        },
         {
           "id": "clean",
           "displayName": "clean",
@@ -197,11 +371,11 @@
       "test": {
         "scopes": ["workspace", "project"],
         "filters": ["suite", "case"],
+        "selectorKinds": ["java.test.fullName"],
         "source": "provider",
         "arguments": [],
         "results": {
-          "decoder": "junitXml",
-          "reports": ["target/surefire-reports/TEST-*.xml", "target/failsafe-reports/TEST-*.xml"]
+          "decoder": "provider"
         }
       },
       "diagnostics": {
@@ -228,7 +402,7 @@
         ]
       },
       "dependencies": { "source": "provider", "scopes": ["workspace", "project"] },
-      "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", "pom.xml"] },
+      "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", ".mvn/jvm.config", ".mvn/wrapper/maven-wrapper.properties", "mvnw", "mvnw.cmd", "pom.xml"] },
       "layout": { "excluded": ["target"] },
       "languageImport": {
         "kind": "maven",

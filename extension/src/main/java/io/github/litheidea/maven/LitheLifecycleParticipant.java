@@ -11,6 +11,7 @@ import javax.inject.Singleton;
 import org.apache.maven.AbstractMavenLifecycleParticipant;
 import org.apache.maven.MavenExecutionException;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.lifecycle.internal.LifecycleExecutionPlanCalculator;
 import org.apache.maven.plugin.MavenPluginManager;
 import org.apache.maven.plugin.version.PluginVersionResolver;
 import org.apache.maven.project.ProjectDependenciesResolver;
@@ -34,24 +35,45 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     static final String DEPENDENCIES_PROJECT = "lithe.dependenciesProject";
 
     private final MavenPluginManager pluginManager;
+    private final LifecycleExecutionPlanCalculator executionPlans;
     private final PluginVersionResolver versionResolver;
     private final ProjectDependenciesResolver dependenciesResolver;
+    private final NativeSettingsEvents settingsEvents;
 
     @Inject
     public LitheLifecycleParticipant(
             MavenPluginManager pluginManager,
             PluginVersionResolver versionResolver,
-            ProjectDependenciesResolver dependenciesResolver) {
+            ProjectDependenciesResolver dependenciesResolver,
+            NativeSettingsEvents settingsEvents,
+            LifecycleExecutionPlanCalculator executionPlans) {
         this.pluginManager = pluginManager;
+        this.executionPlans = executionPlans;
         this.versionResolver = versionResolver;
         this.dependenciesResolver = dependenciesResolver;
+        this.settingsEvents = settingsEvents;
+    }
+
+    /** Settings-only probe exits before reactor reading or lifecycle goals. */
+    @Override
+    public void afterSessionStart(MavenSession session) throws MavenExecutionException {
+        String output = property(session, "lithe.configurationOutput");
+        String context = property(session, "lithe.configurationContextOutput");
+        if (output == null && context == null) return;
+        try {
+            if (output != null) settingsEvents.requireConfigurationExported();
+            else write(context, Json.write(SettingsExport.context(session, settingsEvents.capture())));
+        } catch (Exception error) {
+            throw new MavenExecutionException("Lithe could not inspect Maven configuration.", error);
+        }
+        if (output != null) throw new MavenExecutionException("Lithe configuration inspection completed.", (Throwable) null);
     }
 
     @Override
     public void afterProjectsRead(MavenSession session) throws MavenExecutionException {
         String modelOutput = property(session, MODEL_OUTPUT);
         if (modelOutput != null) {
-            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver).document()));
+            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver, executionPlans).document()));
         }
         String dependenciesOutput = property(session, DEPENDENCIES_OUTPUT);
         if (dependenciesOutput != null) {
@@ -69,7 +91,7 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
         return value == null || value.trim().isEmpty() ? null : value.trim();
     }
 
-    private static void write(String output, String json) throws MavenExecutionException {
+    static void write(String output, String json) throws MavenExecutionException {
         Path path = Paths.get(output);
         try {
             Files.write(path, json.getBytes(StandardCharsets.UTF_8));
