@@ -122,6 +122,15 @@ async function test(signal) {
     });
     const model = await report.step("read the reactor model", () => backend.request("lithe/build/model", params()));
     capture("model.json", model);
+    await check("model diagnostics use one typed terminal without Maven output", async () => {
+      const terminals = backend.diagnostics.filter((entry) => entry.operation === "lithe/build/model");
+      assert.equal(terminals.length, 1);
+      assert.equal(terminals[0].kind, "operationFinished");
+      assert.ok(Number.isSafeInteger(terminals[0].durationMs) && terminals[0].durationMs >= 0);
+      assert.deepEqual(Object.keys(terminals[0]).sort(), ["durationMs", "kind", "operation", "operationId"]);
+      assert.equal(terminals[0].operationId, "2");
+      assert.equal(backend.stderr, "");
+    });
     const byName = (name) => model.projects.find((project) => project.name === name);
 
     await check("the model lists the reactor and its aggregator tree", () => {

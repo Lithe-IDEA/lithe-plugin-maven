@@ -252,6 +252,12 @@ async function test() {
       assert.match(error.message, /\[ERROR\] fake failure for the backend test/);
       assert.doesNotMatch(error.message, /Scanning for projects/);
       assert.equal(readFileSync(snapshotFile, "utf8"), saved);
+      const terminal = client.diagnostics.at(-1);
+      assert.equal(terminal.kind, "operationFailed");
+      assert.equal(terminal.operation, "lithe/build/model");
+      assert.equal(terminal.code, "maven.loadFailed");
+      assert.ok(!JSON.stringify(client.diagnostics).includes("fake failure for the backend test"));
+      assert.equal(client.stderr, "", "Maven output and exceptions never cross the SDK stderr boundary");
       control({});
     });
 

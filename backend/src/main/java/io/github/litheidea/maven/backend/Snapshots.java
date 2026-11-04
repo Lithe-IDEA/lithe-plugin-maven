@@ -67,7 +67,7 @@ final class Snapshots {
             store.write(KEY, snapshot);
         } catch (IOException | RuntimeException error) {
             // The result is still answered; only the next start runs Maven again.
-            backend.log("Could not save the Maven snapshot: " + error.getMessage());
+            backend.diagnostics().degraded("lithe/build/model", "maven.snapshotSaveFailed");
         }
     }
 

@@ -5,11 +5,8 @@
   persistent snapshot, and runs Maven (with the extension in ../extension)
   only when the snapshot is missing, stale or a refresh was asked for.
 
-  Lithe's Java plugin SDK is not published to a Maven repository.
-  scripts/package.mjs downloads the JAR pinned in sdk.lock.json, checks its
-  SHA-256 and passes it as -Dlithe.sdk.jar. It compiles against that file and
-  shade's extraJars merges it into lithe-maven-backend.jar, so the package
-  carries one self-contained JAR and nothing is installed into ~/.m2.
+  The official SDK production sources are vendored with per-file hashes in
+  sdk.lock.json, verified by scripts/package.mjs, and compiled into this JAR.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -29,68 +26,36 @@
     <maven.compiler.release>8</maven.compiler.release>
     <!-- A fixed timestamp makes the jar byte-for-byte reproducible. -->
     <project.build.outputTimestamp>2026-10-20T00:00:00Z</project.build.outputTimestamp>
-    <!-- Absolute path of the checked SDK JAR; set by scripts/package.mjs. -->
-    <lithe.sdk.jar>${project.basedir}/missing-lithe-sdk.jar</lithe.sdk.jar>
   </properties>
 
-  <dependencies>
-    <dependency>
-      <groupId>io.github.lithe-idea</groupId>
-      <artifactId>lithe-plugin-sdk-java</artifactId>
-      <version>0.1.0</version>
-      <scope>system</scope>
-      <systemPath>${lithe.sdk.jar}</systemPath>
-    </dependency>
-  </dependencies>
-
   <build>
+    <sourceDirectory>${project.basedir}/..</sourceDirectory>
     <finalName>lithe-maven-backend</finalName>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <includes>
+            <include>backend/src/main/java/**/*.java</include>
+            <include>vendor/lithe-plugin-sdk-java/src/main/java/**/*.java</include>
+          </includes>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
           <archive>
+            <manifest>
+              <mainClass>io.github.litheidea.maven.backend.MavenBackend</mainClass>
+            </manifest>
             <manifestEntries>
               <Implementation-Version>${project.version}</Implementation-Version>
             </manifestEntries>
           </archive>
         </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>shade</goal>
-            </goals>
-            <configuration>
-              <createDependencyReducedPom>false</createDependencyReducedPom>
-              <!-- Shade leaves system-scoped artifacts out; this merges the SDK in. -->
-              <extraJars>
-                <extraJar>${lithe.sdk.jar}</extraJar>
-              </extraJars>
-              <filters>
-                <filter>
-                  <artifact>*:*</artifact>
-                  <excludes>
-                    <exclude>META-INF/MANIFEST.MF</exclude>
-                  </excludes>
-                </filter>
-              </filters>
-              <transformers>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>io.github.litheidea.maven.backend.MavenBackend</mainClass>
-                  <manifestEntries>
-                    <Implementation-Version>${project.version}</Implementation-Version>
-                  </manifestEntries>
-                </transformer>
-              </transformers>
-            </configuration>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
     <pluginManagement>
@@ -119,11 +84,6 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-jar-plugin</artifactId>
           <version>3.4.2</version>
-        </plugin>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-shade-plugin</artifactId>
-          <version>3.6.0</version>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>

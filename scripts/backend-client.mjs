@@ -12,6 +12,7 @@ export class BackendClient {
   #pending = new Map();
   #nextId = 1;
   stderr = "";
+  diagnostics = [];
 
   /** Starts `java -jar <jar> --state <state>`; `javaOptions` go before `-jar`. */
   constructor({ java = "java", jar, state, env = process.env, javaOptions = [], timeoutMs = WAIT_MS }) {
@@ -70,7 +71,7 @@ export class BackendClient {
     const result = await this.request("initialize", {
       processId: process.pid,
       rootUri: pathToFileURL(root).href,
-      capabilities: { experimental: { litheBuild: { versions: [1] } } },
+      capabilities: { experimental: { litheBuild: { versions: [1] }, litheLogging: { versions: [1] } } },
     });
     this.notify("initialized", {});
     return result;
@@ -118,7 +119,9 @@ export class BackendClient {
       try { message = JSON.parse(this.#buffer.subarray(headerEnd + 4, headerEnd + 4 + length).toString("utf8")); }
       catch { return this.#broken("a frame that is not JSON"); }
       this.#buffer = this.#buffer.subarray(headerEnd + 4 + length);
-      if (message.id !== undefined && message.method === undefined) {
+      if (message.method === "lithe/log") {
+        this.diagnostics.push(message.params);
+      } else if (message.id !== undefined && message.method === undefined) {
         this.#pending.get(message.id)?.(message);
         this.#pending.delete(message.id);
       }
