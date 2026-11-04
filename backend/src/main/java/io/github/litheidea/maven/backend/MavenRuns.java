@@ -152,7 +152,7 @@ final class MavenRuns {
                 if (before.equals(Fingerprint.of(inputs))) {
                     snapshots.write(inputs.root, before, loaded);
                 } else {
-                    backend.log("The Maven project changed while it was read; the result is not saved.");
+                    backend.diagnostics().degraded("lithe/build/model", "maven.inputsChanged");
                 }
             }
             flight.result.complete(loaded);
@@ -192,7 +192,8 @@ final class MavenRuns {
                     .onStderr(tail));
             if (result.exitCode() != 0) {
                 String output = tail.errors();
-                backend.log("Maven exited with status " + result.exitCode() + ":\n" + output);
+                // The SDK records this failed request once. Build output belongs
+                // to the response, never to the diagnostic stderr stream.
                 throw new PluginError("maven.loadFailed", "Maven could not read the project (exit status "
                         + result.exitCode() + ")." + (output.isEmpty() ? "" : "\n" + output));
             }

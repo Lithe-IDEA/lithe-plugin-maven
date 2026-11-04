@@ -69,6 +69,23 @@ Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先�
 
 一个包同时支持 Apple Silicon 和 Intel Mac；Lithe for Windows 支持插件市场后会增加 Windows 包。
 
+## 诊断日志
+
+本分支要求宿主提供 `litheLogging: 1`。SDK 通过类型化的 `lithe/log` 通知，把 Maven provider
+操作交给宿主 v2 目录和统一 writer，写入当前会话的 `plugins/io.github.lithe-idea.maven-build/host` 通道。
+关键成功终态为 INFO、失败终态为 ERROR，包含单调耗时和稳定分类；取消不记失败。
+缓存保存失败或读取中项目变化属于可恢复降级，使用 WARN `degraded`，不记录异常正文、路径或环境值。
+模型快照继续属于 `${workspaceStateDir}`，不会搬到会话日志目录。
+
+Maven 失败由 SDK 的请求边界记录一次，provider 不再重复打印构建输出。
+完整构建输出仍属于 Build Output，模型/依赖树 JSON 属于工作流数据。
+后端从 `vendor/` 直接编译官方 Java SDK 的结构化日志实现，使用 `lithe/log` 发送稳定分类、
+单调耗时和操作身份；原始异常与构建 tail 不进入日志。`sdk.lock.json` 记录真实上游基线、
+本轮尚未发布的源代码改动及每个文件的 SHA-256，没有沿用或伪造旧发版 JAR 的校验值。
+
+排障时使用 Lithe 的独立日志窗口和诊断导出；不要开启输出源码、凭据、环境变量或协议正文的日志。
+Windows 的日志实现仍为 v1，未声明 Windows v2 已完成验收。
+
 ## 开发
 
 ```text
@@ -76,7 +93,9 @@ io.github.lithe-idea.maven-build/plugin.json   # 插件描述，目录名必须�
 io.github.lithe-idea.maven-build/icons/        # 工具窗口和工具栏图标（来源见 NOTICE）
 extension/                                     # Maven 核心扩展，导出模型和依赖树
 backend/                                       # 构建后端（Java 8，Lithe 插件 SDK），快照和 Maven 运行
-sdk.lock.json                                  # 打进后端的 Lithe Java 插件 SDK：版本、下载地址、SHA-256
+vendor/                                        # 官方 Java SDK 生产源码和许可证（不带测试、JAR、target）
+sdk.lock.json                                  # SDK 上游基线、本轮改动身份、逐文件 SHA-256
+scripts/sdk/verify-sdk.mjs                      # 编译前拒绝漂移、遗漏或额外 SDK 文件
 test/fixtures/reactor/                         # 三个模块的示例反应堆，供集成测试使用
 scripts/package.mjs                            # 构建扩展并打包成 dist/maven-build-<版本>-darwin.zip
 scripts/test.mjs                               # 用真实 Maven 经后端读取项目、运行清单里的命令并检查输出
@@ -87,13 +106,11 @@ scripts/test-backend.mjs                       # 用假 Maven 计数，检查快
 
 本地需要 Node.js 22+、JDK（CI 用 17；扩展和后端都按 Java 8 编译，后端运行只需 Java 8）和 Maven（还需要 `zip`）。
 
-后端打进 Lithe 的 Java 插件 SDK。打包脚本按 `sdk.lock.json` 下载正式发布的 SDK JAR 到 `.cache/sdk/`，SHA-256 不符就拒绝。
-
-如需本地调试，可用 `LITHE_SDK_JAR` 指向一个 JAR；正式锁定的 SHA-256 仍会校验该文件，发布（`--expect-tag`）不接受这个覆盖变量：
-
-```bash
-LITHE_SDK_JAR=/path/to/lithe-plugin-sdk-java-0.1.0.jar node scripts/package.mjs
-```
+后端把固定在 `vendor/lithe-plugin-sdk-java/src/main/java/` 的 SDK 生产源码一同按 Java 8 编译。
+打包前先校验 `sdk.lock.json`，缺失、改动或额外未登记文件都会拒绝；只读源码不共享可变构建状态。
+不再从网络下载 SDK JAR，也不接受 `LITHE_SDK_JAR` 替换构建输入。
+SDK 以 Apache-2.0 分发，源码许可证位于 `vendor/LICENSE`，安装包附带 `SDK-LICENSE`。
+如需更新，先从官方 SDK 仓库取真实生产源码，审查变更并更新基线和逐文件摘要，再执行验证。
 
 开发或发布时直接运行：
 
@@ -144,7 +161,7 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 ## 发布新版本
 
 1. 同时修改 `plugin.json`、`extension/pom.xml` 和 `backend/pom.xml` 的版本（例如 `0.2.0`；打包脚本会检查三者一致），
-   确认 `sdk.lock.json` 已填入正式发布的 SDK 地址和 SHA-256，合入 `main`。
+   确认 `sdk.lock.json` 已登记所用 SDK 源码、上游基线与全部 SHA-256，合入 `main`。
 2. 推送同名标签：
 
    ```bash

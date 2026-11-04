@@ -12,3 +12,8 @@ Version 2.0, at revision 158b854d47ac9af2bbd99c0d7c354a5875cb6f81:
   skipTests.svg  platform/icons/src/expui/run/showIgnored.svg
 
 Copyright 2000-2024 JetBrains s.r.o. and contributors.
+
+The backend includes the Apache-2.0 licensed official Lithe Java plugin SDK
+from Lithe-IDEA/lithe-plugin-docs. Its production sources and LICENSE are
+vendored in vendor/, with upstream base revision, local structured logging
+changes and exact SHA-256 per input recorded in sdk.lock.json.

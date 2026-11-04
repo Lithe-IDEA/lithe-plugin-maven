@@ -55,7 +55,7 @@ public final class MavenBackend {
                 snapshots = new Snapshots(store, backend);
                 state = store.directory();
             } else {
-                backend.log("No --state directory: Maven results are not kept across restarts.");
+                backend.diagnostics().degraded("initialize", "maven.stateUnavailable");
             }
             runs = new MavenRuns(snapshots, backend, state);
         });
