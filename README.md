@@ -10,7 +10,7 @@
 > Maven with a small bundled core extension that only reads the reactor, from a Java build provider that keeps the
 > result in a snapshot, so reopening a project does not run Maven again until a POM or setting changes.
 
-> **试用版**：0.1.0 作为预发布版本提供，需要基于 Lithe `preview`、包含 `buildSystems` 插件接口及原生构建窗口支持的开发版。宿主支持 PR 合并前，请使用包含该改动的开发构建。
+> **预览版**：0.1.2 需要提供结构化插件诊断（`litheLogging: 1`）的 Lithe `preview` 开发版。稳定版 Lithe 0.6.7 没有 `litheLogging: 1`，能安装但无法启动构建后端，请继续使用 Lithe Store 中的 0.1.1。0.1.2 以预发布版本提供，暂不收录 Lithe Store。
 
 ## 功能
 
@@ -63,7 +63,9 @@ brew install maven
 
 ## 安装
 
-Lithe Store 的 Maven 条目合并后，才可在上述兼容开发版中打开 **设置 → 插件 → 插件市场**，搜索 “Maven”，安装并按提示重启。
+稳定版 Lithe 在 **设置 → 插件 → 插件市场** 中搜索 “Maven”，安装 0.1.1 并按提示重启。
+0.1.2 预览版请从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-0.1.2-darwin.zip`，
+在 **设置 → 插件** 的 ⚙ 菜单中选择 **从磁盘安装插件…**；Store 无法区分不提供 `litheLogging: 1` 的稳定版宿主，所以暂不收录。
 Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先在 **⚙ → 管理插件仓库…** 中重新添加
 `https://github.com/Lithe-IDEA/Lithe-store`。
 
@@ -71,7 +73,7 @@ Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先�
 
 ## 诊断日志
 
-本分支要求宿主提供 `litheLogging: 1`。SDK 通过类型化的 `lithe/log` 通知，把 Maven provider
+0.1.2 起要求宿主提供 `litheLogging: 1`。SDK 通过类型化的 `lithe/log` 通知，把 Maven provider
 操作交给宿主 v2 目录和统一 writer，写入当前会话的 `plugins/io.github.lithe-idea.maven-build/host` 通道。
 关键成功终态为 INFO、失败终态为 ERROR，包含单调耗时和稳定分类；取消不记失败。
 缓存保存失败或读取中项目变化属于可恢复降级，使用 WARN `degraded`，不记录异常正文、路径或环境值。
@@ -102,6 +104,7 @@ scripts/test.mjs                               # 用真实 Maven 经后端读取
 scripts/test-backend.mjs                       # 用假 Maven 计数，检查快照命中、失效、刷新、合并运行和取消
 .github/workflows/ci.yml                       # PR 时打包、用 Maven 3.6.3 和最新版测试，并用 Lithe Store 的规则检查
 .github/workflows/release.yml                  # 推送 v<版本> 标签时发布 GitHub Release
+docs/releases/v<版本>.md                       # 该版本的变化，发布时并入 Release 说明（可选）
 ```
 
 本地需要 Node.js 22+、JDK（CI 用 17；扩展和后端都按 Java 8 编译，后端运行只需 Java 8）和 Maven（还需要 `zip`）。
@@ -168,8 +171,8 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
    git tag v0.2.0 && git push origin v0.2.0
    ```
 
-3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。首个 `v0.1.0` 会自动标为预发布版本，需要包含 `buildSystems` 接口的 Lithe 开发版。
-4. Lithe Store 的自动追踪会发现稳定版本并开合并请求，合并后用户即可在 Lithe 中更新。自动追踪会跳过预发布版本；`v0.1.0` 需要在 Store 中手工提交条目，并使用已发布 ZIP 的实际 SHA-256。
+3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。`release.yml` 里 `PRERELEASE_TAGS` 列出的版本（`v0.1.0` 试用版、需要 `litheLogging: 1` 的 `v0.1.2`）会标为预发布版本。
+4. Lithe Store 的自动追踪会发现稳定版本并开合并请求，合并后用户即可在 Lithe 中更新。自动追踪会跳过预发布版本；需要收录时在 Store 中手工提交条目，并使用已发布 ZIP 的实际 SHA-256。
 
 ## 许可
 
