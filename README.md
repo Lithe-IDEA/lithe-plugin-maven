@@ -27,6 +27,16 @@
 | 快照 | 项目和依赖保存在工作区状态目录，重新打开项目时直接显示；POM、`.mvn/` 配置、settings.xml、选项或 Maven/Java 变化后才重新运行 Maven，Reload 总是重新运行 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
 
+## 新建项目
+
+插件在 **New Project** 窗口提供两个条目：
+
+- **Maven**：生成 Maven Java 项目，可选示例代码，可设置 GroupId 和 ArtifactId。
+- **Maven Archetype**：用内置原型或自定义原型，由 `mvn` 生成项目。
+
+模板在 `io.github.lithe-idea.maven-build/templates/java/`，从 Java Support 插件移来。
+生成的项目需要 Java Support 提供 Java 语言支持。
+
 ## 依赖的程序
 
 插件不带 Maven，使用你项目或电脑上的 Maven，按以下顺序查找：
@@ -92,7 +102,8 @@ Windows 的日志实现仍为 v1，未声明 Windows v2 已完成验收。
 
 ```text
 io.github.lithe-idea.maven-build/plugin.json   # 插件描述，目录名必须等于插件 id
-io.github.lithe-idea.maven-build/icons/        # 工具窗口和工具栏图标（来源见 NOTICE）
+io.github.lithe-idea.maven-build/icons/        # 工具窗口、工具栏和新建项目图标（来源见 NOTICE）
+io.github.lithe-idea.maven-build/templates/    # 新建项目的文件模板（Maven 项目），打包时检查路径是否存在
 extension/                                     # Maven 核心扩展，导出模型和依赖树
 backend/                                       # 构建后端（Java 8，Lithe 插件 SDK），快照和 Maven 运行
 vendor/                                        # 官方 Java SDK 生产源码和许可证（不带测试、JAR、target）
