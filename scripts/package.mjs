@@ -20,7 +20,7 @@ import { createReport } from "./report.mjs";
 import { verifySdk } from "./sdk/verify-sdk.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
 const ASSET_PREFIX = "maven-build";
@@ -52,6 +52,24 @@ const tagFlag = process.argv.indexOf("--expect-tag");
 if (tagFlag >= 0) {
   const tag = process.argv[tagFlag + 1];
   if (tag !== `v${manifest.version}`) problems.push(`tag ${tag} does not match plugin.json version ${manifest.version} (expected v${manifest.version})`);
+}
+
+// New Project reads a generator's icons and file templates from the installed
+// package, so a wrong path would otherwise only fail on a user's machine.
+const checkGeneratorPath = (generatorID, label, path, isExpected) => {
+  if (typeof path !== "string" || path === "" || isAbsolute(path) || path.split(/[\\/]/).includes("..")) {
+    problems.push(`generator ${generatorID}: ${label} ${JSON.stringify(path)} must be a relative path inside the package without ".."`);
+    return;
+  }
+  const target = join(PACKAGE_DIR, path);
+  if (!existsSync(target) || !isExpected(lstatSync(target))) problems.push(`generator ${generatorID}: missing ${label} ${path}`);
+};
+for (const generator of manifest.projectGenerators ?? []) {
+  if (generator.icon?.path !== undefined) checkGeneratorPath(generator.id, "icon file", generator.icon.path, (stat) => stat.isFile());
+  if (generator.icon?.darkPath !== undefined) checkGeneratorPath(generator.id, "dark icon file", generator.icon.darkPath, (stat) => stat.isFile());
+  for (const step of generator.steps ?? []) {
+    if (step.source !== undefined) checkGeneratorPath(generator.id, "template directory", step.source, (stat) => stat.isDirectory());
+  }
 }
 if (problems.length > 0) {
   for (const problem of problems) console.error(`✗ ${problem}`);
