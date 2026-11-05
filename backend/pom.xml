@@ -5,8 +5,9 @@
   persistent snapshot, and runs Maven (with the extension in ../extension)
   only when the snapshot is missing, stale or a refresh was asked for.
 
-  The official SDK production sources are vendored with per-file hashes in
-  sdk.lock.json, verified by scripts/package.mjs, and compiled into this JAR.
+  The production sources of the released official SDK are vendored
+  unmodified, pinned in sdk.lock.json, verified by scripts/package.mjs, and
+  compiled into this JAR.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -16,7 +17,7 @@
   <groupId>io.github.lithe-idea</groupId>
   <artifactId>lithe-maven-backend</artifactId>
   <!-- Kept equal to plugin.json's version; scripts/package.mjs checks it. -->
-  <version>0.1.2</version>
+  <version>0.1.3</version>
   <packaging>jar</packaging>
   <name>Lithe Maven build provider</name>
 

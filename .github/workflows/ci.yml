@@ -32,8 +32,14 @@ jobs:
             17
       - name: Check script process deadlines and cleanup
         run: node scripts/test-process.mjs
+      - name: Test the SDK lock verification
+        run: node scripts/sdk/test-verify-sdk.mjs
       - name: Verify vendored Java SDK sources
         run: node scripts/sdk/verify-sdk.mjs
+      # Network check: the tag still points at the locked commit, the release
+      # asset has the locked SHA-256, and vendor/ is the tag's unmodified source.
+      - name: Verify the SDK lock against the published release
+        run: node scripts/sdk/verify-sdk.mjs --download
       - name: Check manifest and build the archive
         run: node scripts/package.mjs
       - name: Test the build provider's snapshot with a fake Maven (Java 17)

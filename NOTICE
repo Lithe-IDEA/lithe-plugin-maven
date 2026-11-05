@@ -14,6 +14,7 @@ Version 2.0, at revision 158b854d47ac9af2bbd99c0d7c354a5875cb6f81:
 Copyright 2000-2024 JetBrains s.r.o. and contributors.
 
 The backend includes the Apache-2.0 licensed official Lithe Java plugin SDK
-from Lithe-IDEA/lithe-plugin-docs. Its production sources and LICENSE are
-vendored in vendor/, with upstream base revision, local structured logging
-changes and exact SHA-256 per input recorded in sdk.lock.json.
+0.3.0 from Lithe-IDEA/lithe-plugin-docs (tag sdk-java-v0.3.0). Its unmodified
+production sources and LICENSE are vendored in vendor/, with the release tag,
+commit, release asset SHA-256 and exact SHA-256 per input recorded in
+sdk.lock.json.
