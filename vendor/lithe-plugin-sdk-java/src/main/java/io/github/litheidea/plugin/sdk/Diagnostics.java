@@ -15,7 +15,8 @@ public final class Diagnostics {
             "lithe/build/discoverTests", "lithe/build/prepareRun", "lithe/build/prepareDebug",
             "lithe/vcs/status", "lithe/vcs/baseContent", "lithe/vcs/history", "lithe/vcs/fileHistory",
             "lithe/vcs/annotate", "lithe/vcs/checkin", "lithe/vcs/rollback", "lithe/vcs/update",
-            "lithe/vcs/fileOperation", "lithe/vcs/resolve", "lithe/vcs/cleanup"));
+            "lithe/vcs/fileOperation", "lithe/vcs/resolve", "lithe/vcs/cleanup",
+            "lithe/keymap/import"));
     private final Backend backend;
     private final String operationId;
 

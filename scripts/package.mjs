@@ -9,9 +9,9 @@
 // every Mac. The unpacked package stays in dist/package/ for installing a
 // local development copy into Lithe.
 //
-// The backend compiles the official SDK sources pinned by sdk.lock.json into
-// the same JAR. Every input is verified before Maven runs; build outputs and
-// plugin runtime state never become part of the source lock.
+// The backend compiles the released official SDK sources pinned by
+// sdk.lock.json into the same JAR. Every input is verified before Maven runs;
+// build outputs and plugin runtime state never become part of the source lock.
 //
 // Usage: node scripts/package.mjs [--expect-tag <tag>]
 

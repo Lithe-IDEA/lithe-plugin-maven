@@ -13,6 +13,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -43,6 +46,74 @@ public final class Backend {
     @FunctionalInterface
     public interface Handler {
         Object handle(Map<String, Object> params, CallContext context) throws Exception;
+    }
+
+    /** Answers an independently negotiated shortcut import request. */
+    @FunctionalInterface
+    public interface KeymapImportHandler {
+        Object handle(KeymapSnapshot snapshot, CallContext context) throws Exception;
+    }
+
+    /** One file within the user's selected source; its path is a relative label. */
+    public static final class KeymapSourceFile {
+        private final String id;
+        private final String path;
+        private final long byteCount;
+        KeymapSourceFile(String id, String path, long byteCount) { this.id = id; this.path = path; this.byteCount = byteCount; }
+        public String id() { return id; }
+        public String path() { return path; }
+        public long byteCount() { return byteCount; }
+    }
+
+    /** Opaque selected source scoped to one import and backend session. */
+    public static final class KeymapSnapshot {
+        private final String providerId;
+        private final String snapshotId;
+        private final Host host;
+        KeymapSnapshot(String providerId, String snapshotId, Host host) {
+            this.providerId = providerId; this.snapshotId = snapshotId; this.host = host;
+        }
+        public String providerId() { return providerId; }
+        public String snapshotId() { return snapshotId; }
+        private Map<String, Object> scope() {
+            Map<String, Object> result = singleton("providerID", providerId);
+            result.put("snapshotID", snapshotId);
+            return result;
+        }
+        public CompletableFuture<List<KeymapSourceFile>> listInputs() {
+            return host.request("lithe/host/keymapImport/listInputs", scope()).thenApply(raw -> {
+                Object files = raw instanceof Map ? ((Map<?, ?>) raw).get("files") : null;
+                if (!(files instanceof List) || ((List<?>) files).size() > 128) throw invalidKeymapResponse();
+                List<KeymapSourceFile> result = new ArrayList<>();
+                for (Object item : (List<?>) files) {
+                    if (!(item instanceof Map)) throw invalidKeymapResponse();
+                    Map<?, ?> file = (Map<?, ?>) item;
+                    Object id = file.get("id"), path = file.get("path"), count = file.get("byteCount");
+                    if (!(id instanceof String) || !validSnapshotToken((String) id) || !(path instanceof String)
+                            || ((String) path).isEmpty() || ((String) path).getBytes(StandardCharsets.UTF_8).length > 4096
+                            || !(count instanceof Number) || ((Number) count).doubleValue() != ((Number) count).longValue()
+                            || ((Number) count).longValue() < 0 || ((Number) count).longValue() > 1048576) throw invalidKeymapResponse();
+                    result.add(new KeymapSourceFile((String) id, (String) path, ((Number) count).longValue()));
+                }
+                return result;
+            });
+        }
+        public CompletableFuture<byte[]> readChunk(String fileId, long offset, int maximumBytes) {
+            if (!validSnapshotToken(fileId) || offset < 0 || offset > 1048576 || maximumBytes < 1 || maximumBytes > 131072) {
+                throw invalidKeymapResponse();
+            }
+            Map<String, Object> params = scope();
+            params.put("fileID", fileId); params.put("offset", offset); params.put("maximumBytes", maximumBytes);
+            return host.request("lithe/host/keymapImport/readChunk", params).thenApply(raw -> {
+                Object encoded = raw instanceof Map ? ((Map<?, ?>) raw).get("data") : null;
+                if (!(encoded instanceof String) || ((String) encoded).length() > 174764) throw invalidKeymapResponse();
+                final byte[] bytes;
+                try { bytes = Base64.getDecoder().decode((String) encoded); }
+                catch (IllegalArgumentException error) { throw invalidKeymapResponse(); }
+                if (bytes.length > maximumBytes || !Base64.getEncoder().encodeToString(bytes).equals(encoded)) throw invalidKeymapResponse();
+                return bytes;
+            });
+        }
     }
 
     /** Answers a standard LSP request, for a backend that is also a language server. */
@@ -139,6 +210,8 @@ public final class Backend {
     private final Object lock = new Object();
     private final Object writeLock = new Object();
     private final Map<String, Handler> functions = new HashMap<>();
+    private final Map<String, KeymapImportHandler> keymapProviders = new HashMap<>();
+    private final Set<String> selectedKeymapProviders = new TreeSet<>();
     private final Map<String, Handler> buildHandlers = new HashMap<>();
     private final Map<String, RequestHandler> requestHandlers = new HashMap<>();
     private final Map<String, NotificationHandler> notificationHandlers = new HashMap<>();
@@ -169,9 +242,10 @@ public final class Backend {
         if (experimental instanceof Map
                 && (((Map<?, ?>) experimental).containsKey("litheBuild")
                         || ((Map<?, ?>) experimental).containsKey("litheFunctions")
+                        || ((Map<?, ?>) experimental).containsKey("litheKeymapImport")
                         || ((Map<?, ?>) experimental).containsKey("litheLogging"))) {
             throw new PluginSdkError("sdk.capabilities.reserved",
-                    "litheBuild and litheFunctions are negotiated by the SDK; declare handlers instead.");
+                    "litheBuild, litheFunctions, litheKeymapImport and litheLogging are negotiated by the SDK; declare handlers instead.");
         }
         this.name = name == null ? "lithe-plugin-backend" : name;
         this.version = version;
@@ -274,6 +348,18 @@ public final class Backend {
             }
             checkNewFunction(id, handler);
             functions.put(id, handler);
+        }
+        return this;
+    }
+
+    /** Declares a shortcut import provider before initialization. */
+    public Backend keymapImportProvider(String id, KeymapImportHandler handler) {
+        synchronized (lock) {
+            if (!beforeAnswer() || !validKeymapProvider(id) || handler == null
+                    || keymapProviders.containsKey(id) || keymapProviders.size() >= 8) {
+                throw new PluginSdkError("sdk.keymap.invalidRegistration", "Invalid or duplicate shortcut import provider.");
+            }
+            keymapProviders.put(id, handler);
         }
         return this;
     }
@@ -594,6 +680,10 @@ public final class Backend {
             invokeFunction(id, params);
             return;
         }
+        if (method.equals("lithe/keymap/import")) {
+            invokeKeymap(id, params);
+            return;
+        }
         Handler build;
         RequestHandler handler;
         synchronized (lock) {
@@ -765,6 +855,22 @@ public final class Backend {
                 }
                 Map<String, Object> experimental = new LinkedHashMap<>(experimental(capabilities));
                 experimental.put("litheLogging", singleton("version", 1));
+                Map<String, Object> offeredCapabilities = experimental(params.get("capabilities"));
+                Object keymap = offeredCapabilities.get("litheKeymapImport");
+                if (offers(keymap, 1) && keymap instanceof Map) {
+                    Object providers = ((Map<?, ?>) keymap).get("providers");
+                    if (providers instanceof List && ((List<?>) providers).size() <= 8) {
+                        selectedKeymapProviders.clear();
+                        for (Object provider : (List<?>) providers) {
+                            if (provider instanceof String && keymapProviders.containsKey(provider)) selectedKeymapProviders.add((String) provider);
+                        }
+                        if (!selectedKeymapProviders.isEmpty()) {
+                            Map<String, Object> entry = singleton("version", 1);
+                            entry.put("providers", new ArrayList<>(selectedKeymapProviders));
+                            experimental.put("litheKeymapImport", entry);
+                        }
+                    }
+                }
                 if (agreed.build()) {
                     experimental.put("litheBuild", singleton("version", agreed.buildVersion()));
                 }
@@ -817,6 +923,34 @@ public final class Backend {
             Processes.killAll();
             respond(id, null, null);
         });
+    }
+
+    private void invokeKeymap(Object id, Object raw) {
+        Map<String, Object> params = raw instanceof Map ? Json.object(raw) : new LinkedHashMap<>();
+        Object provider = params.get("providerID"), snapshot = params.get("snapshotID");
+        KeymapImportHandler handler;
+        synchronized (lock) {
+            handler = provider instanceof String && selectedKeymapProviders.contains(provider) ? keymapProviders.get(provider) : null;
+        }
+        if (params.size() != 2 || !(provider instanceof String) || !validKeymapProvider((String) provider)
+                || !(snapshot instanceof String) || !validSnapshotToken((String) snapshot) || handler == null) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Invalid shortcut import request."));
+            return;
+        }
+        run(id, null, null, null, context -> handler.handle(new KeymapSnapshot((String) provider, (String) snapshot, context.host()), context),
+                Backend::functionResult, null, null, "lithe/keymap/import");
+    }
+
+    private static boolean validKeymapProvider(String id) {
+        return id != null && id.matches("[a-z][a-z0-9-]{0,63}");
+    }
+
+    private static boolean validSnapshotToken(String id) {
+        return id != null && id.matches("[a-zA-Z0-9_-]{1,128}");
+    }
+
+    private static PluginSdkError invalidKeymapResponse() {
+        return new PluginSdkError("sdk.keymap.invalidResponse", "Invalid shortcut source response.");
     }
 
     private void invokeFunction(Object id, Object raw) {

@@ -10,7 +10,7 @@
 > Maven with a small bundled core extension that only reads the reactor, from a Java build provider that keeps the
 > result in a snapshot, so reopening a project does not run Maven again until a POM or setting changes.
 
-> **预览版**：0.1.2 需要提供结构化插件诊断（`litheLogging: 1`）的 Lithe `preview` 开发版。稳定版 Lithe 0.6.7 没有 `litheLogging: 1`，能安装但无法启动构建后端，请继续使用 Lithe Store 中的 0.1.1。0.1.2 以预发布版本提供，暂不收录 Lithe Store。
+> **预览版**：0.1.3 使用官方发布的 Java SDK 0.3.0，需要提供结构化插件诊断（`litheLogging: 1`）的 Lithe `preview` 开发版。稳定版 Lithe 0.6.7 没有 `litheLogging: 1`，能安装但无法启动构建后端，请继续使用 Lithe Store 中的 0.1.1。0.1.3 以预发布版本提供，暂不收录 Lithe Store。
 
 ## 功能
 
@@ -64,7 +64,7 @@ brew install maven
 ## 安装
 
 稳定版 Lithe 在 **设置 → 插件 → 插件市场** 中搜索 “Maven”，安装 0.1.1 并按提示重启。
-0.1.2 预览版请从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-0.1.2-darwin.zip`，
+0.1.3 预览版请从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-0.1.3-darwin.zip`，
 在 **设置 → 插件** 的 ⚙ 菜单中选择 **从磁盘安装插件…**；Store 无法区分不提供 `litheLogging: 1` 的稳定版宿主，所以暂不收录。
 Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先在 **⚙ → 管理插件仓库…** 中重新添加
 `https://github.com/Lithe-IDEA/Lithe-store`。
@@ -73,7 +73,7 @@ Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先�
 
 ## 诊断日志
 
-0.1.2 起要求宿主提供 `litheLogging: 1`。SDK 通过类型化的 `lithe/log` 通知，把 Maven provider
+0.1.2 起要求宿主提供 `litheLogging: 1`；0.1.3 起使用官方发布的 Java SDK 0.3.0，需要提供 `litheLogging: 1` 的 Lithe 构建。SDK 通过类型化的 `lithe/log` 通知，把 Maven provider
 操作交给宿主 v2 目录和统一 writer，写入当前会话的 `plugins/io.github.lithe-idea.maven-build/host` 通道。
 关键成功终态为 INFO、失败终态为 ERROR，包含单调耗时和稳定分类；取消不记失败。
 缓存保存失败或读取中项目变化属于可恢复降级，使用 WARN `degraded`，不记录异常正文、路径或环境值。
@@ -81,9 +81,9 @@ Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先�
 
 Maven 失败由 SDK 的请求边界记录一次，provider 不再重复打印构建输出。
 完整构建输出仍属于 Build Output，模型/依赖树 JSON 属于工作流数据。
-后端从 `vendor/` 直接编译官方 Java SDK 的结构化日志实现，使用 `lithe/log` 发送稳定分类、
-单调耗时和操作身份；原始异常与构建 tail 不进入日志。`sdk.lock.json` 记录真实上游基线、
-本轮尚未发布的源代码改动及每个文件的 SHA-256，没有沿用或伪造旧发版 JAR 的校验值。
+后端从 `vendor/` 直接编译官方发布的 Java SDK 0.3.0，使用 `lithe/log` 发送稳定分类、
+单调耗时和操作身份；原始异常与构建 tail 不进入日志。`sdk.lock.json` 固定该发布版的 tag、
+tag 指向的提交、发布 JAR 的 SHA-256，以及每个源文件的上游路径和 SHA-256；`vendor/` 里没有对 SDK 的本地改动。
 
 排障时使用 Lithe 的独立日志窗口和诊断导出；不要开启输出源码、凭据、环境变量或协议正文的日志。
 Windows 的日志实现仍为 v1，未声明 Windows v2 已完成验收。
@@ -96,8 +96,9 @@ io.github.lithe-idea.maven-build/icons/        # 工具窗口和工具栏图标�
 extension/                                     # Maven 核心扩展，导出模型和依赖树
 backend/                                       # 构建后端（Java 8，Lithe 插件 SDK），快照和 Maven 运行
 vendor/                                        # 官方 Java SDK 生产源码和许可证（不带测试、JAR、target）
-sdk.lock.json                                  # SDK 上游基线、本轮改动身份、逐文件 SHA-256
-scripts/sdk/verify-sdk.mjs                      # 编译前拒绝漂移、遗漏或额外 SDK 文件
+sdk.lock.json                                  # 官方 Java SDK 发布版的 tag、提交、JAR SHA-256 和逐文件 SHA-256
+scripts/sdk/verify-sdk.mjs                      # 编译前拒绝漂移、遗漏或额外 SDK 文件；--download 再核对发布版
+scripts/sdk/test-verify-sdk.mjs                 # SDK 锁校验的回归测试（不联网）
 test/fixtures/reactor/                         # 三个模块的示例反应堆，供集成测试使用
 scripts/package.mjs                            # 构建扩展并打包成 dist/maven-build-<版本>-darwin.zip
 scripts/test.mjs                               # 用真实 Maven 经后端读取项目、运行清单里的命令并检查输出
@@ -113,7 +114,15 @@ docs/releases/v<版本>.md                       # 该版本的变化，发布�
 打包前先校验 `sdk.lock.json`，缺失、改动或额外未登记文件都会拒绝；只读源码不共享可变构建状态。
 不再从网络下载 SDK JAR，也不接受 `LITHE_SDK_JAR` 替换构建输入。
 SDK 以 Apache-2.0 分发，源码许可证位于 `vendor/LICENSE`，安装包附带 `SDK-LICENSE`。
-如需更新，先从官方 SDK 仓库取真实生产源码，审查变更并更新基线和逐文件摘要，再执行验证。
+如需升级 SDK，改用新的官方发布版：从该发布 tag 取未经修改的生产源码替换 `vendor/`，在 `sdk.lock.json` 中更新
+版本、tag、提交、发布 JAR 的 URL 和 SHA-256 以及逐文件摘要，再执行验证。不要在 `vendor/` 里改 SDK 源码；
+需要的改动先进入官方 SDK 并发布。
+
+```bash
+node scripts/sdk/verify-sdk.mjs             # 离线：vendor/ 与锁文件逐文件一致
+node scripts/sdk/verify-sdk.mjs --download  # 联网：tag 仍指向锁定提交、发布 JAR 的 SHA-256、各文件与 tag 上的原文件一致
+node scripts/sdk/test-verify-sdk.mjs        # 锁校验自身的回归测试
+```
 
 开发或发布时直接运行：
 
@@ -164,14 +173,16 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 ## 发布新版本
 
 1. 同时修改 `plugin.json`、`extension/pom.xml` 和 `backend/pom.xml` 的版本（例如 `0.2.0`；打包脚本会检查三者一致），
-   确认 `sdk.lock.json` 已登记所用 SDK 源码、上游基线与全部 SHA-256，合入 `main`。
+   确认 `sdk.lock.json` 锁定的是官方发布的 SDK（tag、提交、发布 JAR 的 SHA-256 与全部源文件 SHA-256，
+   `node scripts/sdk/verify-sdk.mjs --download` 通过），合入 `main`。
 2. 推送同名标签：
 
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
 
-3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。`release.yml` 里 `PRERELEASE_TAGS` 列出的版本（`v0.1.0` 试用版、需要 `litheLogging: 1` 的 `v0.1.2`）会标为预发布版本。
+3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。`release.yml` 里 `PRERELEASE_TAGS` 列出的版本（`v0.1.0` 试用版、需要 `litheLogging: 1` 的 `v0.1.2` 和 `v0.1.3`）会标为预发布版本；
+   创建 Release 后工作流会回读 `isPrerelease`，与预期不符时先执行 `gh release edit --prerelease`，仍不符则任务失败。
 4. Lithe Store 的自动追踪会发现稳定版本并开合并请求，合并后用户即可在 Lithe 中更新。自动追踪会跳过预发布版本；需要收录时在 Store 中手工提交条目，并使用已发布 ZIP 的实际 SHA-256。
 
 ## 许可

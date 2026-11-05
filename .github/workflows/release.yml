@@ -41,9 +41,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          # v0.1.0 was a trial release. v0.1.2 needs a host offering
+          # v0.1.0 was a trial release. v0.1.2 and v0.1.3 need a host offering
           # litheLogging 1, which stable Lithe 0.6.7 lacks.
-          PRERELEASE_TAGS: v0.1.0 v0.1.2
+          PRERELEASE_TAGS: v0.1.0 v0.1.2 v0.1.3
         run: |
           prerelease=false
           for tag in $PRERELEASE_TAGS; do
@@ -72,3 +72,17 @@ jobs:
             release_flags+=(--prerelease)
           fi
           gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${release_flags[@]}"
+          # Read the flag back: a prerelease published as a normal release would
+          # become Latest and reach stable users. Correct it, or fail the job.
+          actual="$(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq .isPrerelease)"
+          if [[ "$actual" != "$prerelease" ]]; then
+            echo "Release $GITHUB_REF_NAME has isPrerelease=$actual, expected $prerelease." >&2
+            if [[ "$prerelease" == true ]]; then
+              gh release edit "$GITHUB_REF_NAME" --prerelease
+              actual="$(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq .isPrerelease)"
+            fi
+          fi
+          if [[ "$actual" != "$prerelease" ]]; then
+            echo "Release $GITHUB_REF_NAME still has isPrerelease=$actual, expected $prerelease." >&2
+            exit 1
+          fi
