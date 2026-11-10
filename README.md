@@ -10,7 +10,7 @@
 > Maven with a small bundled core extension that only reads the reactor, from a Java build provider that keeps the
 > result in a snapshot, so reopening a project does not run Maven again until a POM or setting changes.
 
-> **预览版**：0.1.2 需要提供结构化插件诊断（`litheLogging: 1`）的 Lithe `preview` 开发版。稳定版 Lithe 0.6.7 没有 `litheLogging: 1`，能安装但无法启动构建后端，请继续使用 Lithe Store 中的 0.1.1。0.1.2 以预发布版本提供，暂不收录 Lithe Store。
+> **预览版**：0.1.3 需要提供 `backend: 2`、`pluginFunctions: 1`、`projectGenerators: 1` 和结构化插件诊断（`litheLogging: 1`）的 Lithe `preview` 开发版或更新的客户端。稳定版 Lithe 0.6.7 没有 `pluginFunctions: 1`，会拒绝安装 0.1.3；Store 的 `requires` 能力表让稳定版继续使用 0.1.1。0.1.3 同时发布到 Lithe Store。
 
 ## 功能
 
@@ -90,9 +90,9 @@ brew install maven
 
 ## 安装
 
-稳定版 Lithe 在 **设置 → 插件 → 插件市场** 中搜索 “Maven”，安装 0.1.1 并按提示重启。
-0.1.2 预览版请从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-0.1.2-darwin.zip`，
-在 **设置 → 插件** 的 ⚙ 菜单中选择 **从磁盘安装插件…**；Store 无法区分不提供 `litheLogging: 1` 的稳定版宿主，所以暂不收录。
+在 **设置 → 插件 → 插件市场** 中搜索 “Maven” 并按提示重启：稳定版 Lithe 会得到 0.1.1，支持 `pluginFunctions: 1` 的 preview 开发版或更新的客户端会得到 0.1.3。
+也可以从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-0.1.3-darwin.zip`，
+在 **设置 → 插件** 的 ⚙ 菜单中选择 **从磁盘安装插件…**。
 Lithe 已预置 Lithe Store 社区插件源；如果你之前移除了它，先在 **⚙ → 管理插件仓库…** 中重新添加
 `https://github.com/Lithe-IDEA/Lithe-store`。
 
