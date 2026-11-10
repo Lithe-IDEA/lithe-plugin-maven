@@ -14,10 +14,12 @@ export class BackendClient {
   stderr = "";
   diagnostics = [];
 
-  /** Starts `java -jar <jar> --state <state>`; `javaOptions` go before `-jar`. */
-  constructor({ java = "java", jar, state, env = process.env, javaOptions = [], timeoutMs = WAIT_MS }) {
+  /** Starts `java -jar <jar> --state <state>` (or `args`); `javaOptions` go before `-jar`. */
+  constructor({ java = "java", jar, state, env = process.env, javaOptions = [], timeoutMs = WAIT_MS, args, hostRequests = {} }) {
     this.timeoutMs = timeoutMs;
-    this.child = spawn(java, [...javaOptions, "-jar", jar, "--state", state], {
+    // Answers to requests the backend sends to the host, keyed by method.
+    this.hostRequests = hostRequests;
+    this.child = spawn(java, [...javaOptions, "-jar", jar, ...(args ?? ["--state", state])], {
       env, stdio: ["pipe", "pipe", "pipe"], detached: true,
     });
     this.exited = new Promise((resolve) => this.child.once("exit", (code, signal) => {
@@ -67,11 +69,14 @@ export class BackendClient {
     this.notify("$/cancelRequest", { id });
   }
 
-  async initialize(root) {
+  async initialize(root, { functions = false } = {}) {
     const result = await this.request("initialize", {
       processId: process.pid,
       rootUri: pathToFileURL(root).href,
-      capabilities: { experimental: { litheBuild: { versions: [1] }, litheLogging: { versions: [1] } } },
+      capabilities: { experimental: {
+        ...(functions ? { litheFunctions: { versions: [1, 2, 3] } } : { litheBuild: { versions: [1] } }),
+        litheLogging: { versions: [1] },
+      } },
     });
     this.notify("initialized", {});
     return result;
@@ -121,6 +126,11 @@ export class BackendClient {
       this.#buffer = this.#buffer.subarray(headerEnd + 4 + length);
       if (message.method === "lithe/log") {
         this.diagnostics.push(message.params);
+      } else if (message.id !== undefined && message.method !== undefined) {
+        const answer = this.hostRequests[message.method];
+        this.#write(answer === undefined
+          ? { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported" } }
+          : { jsonrpc: "2.0", id: message.id, result: answer(message.params) });
       } else if (message.id !== undefined && message.method === undefined) {
         this.#pending.get(message.id)?.(message);
         this.#pending.delete(message.id);

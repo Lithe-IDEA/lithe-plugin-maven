@@ -71,6 +71,23 @@ brew install maven
 
 读取项目会执行 POM 中声明的 Maven 扩展和插件，首次读取还可能联网下载插件描述，所以 Lithe 会先确认你信任这个工作区。
 
+## Java 语言服务器的导入设置
+
+旧版清单里的 `buildSystems[].languageImport` 已从插件契约删除。现在 Maven 插件导出插件函数 `languageImport.settings`
+（版本 1，`context: "workspace"`），Java Support 在启动 JDT LS 前调用它，只接受白名单前缀内的键。
+这个函数由插件后端（同一个 `lib/lithe-maven-backend.jar`，以 `--plugin-backend` 启动，与构建提供方是两个进程）回答，
+只读取 `<工作区>/.mvn/maven.config`，不运行 Maven、不写文件：
+
+| `maven.config` 参数 | 导出的键 |
+| --- | --- |
+| `-s` / `--settings <文件>` | `java.configuration.maven.userSettings` |
+| `-gs` / `--global-settings <文件>` | `java.configuration.maven.globalSettings` |
+| `-o` / `--offline` | `java.import.maven.offline.enabled` |
+
+文件不存在时对应的键不导出；`workspaceRoot` 必须落在已打开的本地工作区文件夹内，否则函数拒绝（`maven.invalidRoot`）。
+工具栏里保存的 Profiles、Settings File、Local Repository、Offline 选项只在宿主里，插件后端读不到，所以不会传给 JDT LS，
+需要宿主把已存选项交给插件函数后才能恢复。
+
 ## 安装
 
 稳定版 Lithe 在 **设置 → 插件 → 插件市场** 中搜索 “Maven”，安装 0.1.1 并按提示重启。

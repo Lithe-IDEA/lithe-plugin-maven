@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,19 +34,29 @@ public final class MavenBackend {
 
     private final Backend backend = Backend.create("lithe-maven-backend", VERSION);
     private final String stateDirectory;
+    private final boolean pluginBackend;
     private volatile Path workspaceRoot;
     private volatile Snapshots snapshots;
     private volatile MavenRuns runs;
 
-    private MavenBackend(String stateDirectory) {
+    private MavenBackend(String stateDirectory, boolean pluginBackend) {
         this.stateDirectory = stateDirectory;
+        this.pluginBackend = pluginBackend;
     }
 
     public static void main(String[] arguments) {
-        new MavenBackend(argument(arguments, "--state")).serve();
+        boolean pluginBackend = Arrays.asList(arguments).contains("--plugin-backend");
+        new MavenBackend(argument(arguments, "--state"), pluginBackend).serve();
     }
 
     private void serve() {
+        if (pluginBackend) {
+            // The plugin backend (manifest `backend`) only exports plugin functions
+            // to other plugins; the build provider is the other launch of this JAR.
+            backend.function(LanguageImport.FUNCTION, LanguageImport::handle);
+            backend.listen();
+            return;
+        }
         backend.onInitialize((params, negotiated) -> {
             workspaceRoot = workspaceRoot(Json.string(params, "rootUri"));
             Path state = null;

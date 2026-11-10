@@ -4,15 +4,22 @@
   "displayName": "Maven",
   "version": "0.1.2",
   "pluginAPIVersion": 3,
-  "requires": { "buildProviders": 1, "buildSystems": 1, "projectGenerators": 1, "serverProcess": 1 },
+  "requires": { "backend": 2, "buildProviders": 1, "buildSystems": 1, "pluginFunctions": 1, "projectGenerators": 1, "serverProcess": 1 },
   "vendor": {
     "id": "io.github.lithe-idea",
     "displayName": "Lithe Community",
     "signatureRequirement": "none"
   },
-  "permissions": ["languageServer.launch", "process.build", "project.generate"],
+  "permissions": ["backend.launch", "languageServer.launch", "process.build", "project.generate", "workspace.metadata"],
   "activationEvents": ["onBuildSystem:maven"],
   "languages": [],
+  "backend": {
+    "launch": { "kind": "runtime", "tool": "java", "minimumVersion": "8", "entry": "lib/lithe-maven-backend.jar" },
+    "arguments": ["--plugin-backend"]
+  },
+  "pluginFunctions": {
+    "exports": [{ "id": "languageImport.settings", "version": 1, "context": "workspace" }]
+  },
   "buildSystems": [
     {
       "id": "maven",

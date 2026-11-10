@@ -300,6 +300,34 @@ async function test() {
       assert.equal(runs().at(-1).self, join(root, "mvnw"));
     });
 
+    await check("the plugin backend serves languageImport.settings from .mvn/maven.config inside an open workspace folder", async () => {
+      const project = join(scratch, "language-import");
+      mkdirSync(join(project, ".mvn"), { recursive: true });
+      writeFileSync(join(project, "team-settings.xml"), "<settings/>");
+      writeFileSync(join(project, ".mvn", "maven.config"), '-B --offline\n-s "team-settings.xml"\n-gs missing.xml\n');
+      const contextRef = { contextID: "ctx", generation: 1 };
+      const functions = new BackendClient({
+        java, jar, args: ["--plugin-backend"],
+        hostRequests: { "lithe/host/workspace/getFolders": () => ({ folders: [{ rootID: "r", name: "w", path: scratch }] }) },
+      });
+      clients.add(functions);
+      const initialized = await functions.initialize(project, { functions: true });
+      assert.deepEqual(initialized.capabilities.experimental.litheFunctions.functions, [{ id: "languageImport.settings" }]);
+      const invoke = (workspaceRoot, context = contextRef) => functions.send("lithe/function/invoke", {
+        functionID: "languageImport.settings", operationID: `op-${Math.random()}`, params: { workspaceRoot }, ...(context ? { context } : {}),
+      }).response;
+      const answer = await invoke(project);
+      assert.deepEqual(answer.result, { settings: {
+        "java.import.maven.offline.enabled": true,
+        "java.configuration.maven.userSettings": join(project, "team-settings.xml"),
+      } });
+      assert.equal((await invoke(tmpdir())).error?.data?.code, "maven.invalidRoot");
+      assert.equal((await invoke("relative")).error?.data?.code, "maven.invalidRoot");
+      assert.equal((await invoke(project, null)).error?.data?.code, "maven.noWorkspaceContext");
+      assert.equal(await functions.close(), 0, `the plugin backend exits cleanly\n${functions.stderr}`);
+      clients.delete(functions);
+    });
+
     await check("the backend exits on shutdown and leaves no Maven behind", async () => {
       await stop(client);
       for (const { pid } of runs()) assert.ok(!alive(pid), `Maven ${pid} ended`);
