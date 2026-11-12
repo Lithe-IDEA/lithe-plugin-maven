@@ -27,39 +27,35 @@ jobs:
           java-version: |
             8
             17
-      # --expect-tag requires the tag to match plugin.json and both POM versions.
+      # --expect-tag requires the tag to match plugin.json and the extension POM version.
       - name: Build the archive
         run: |
           set -o pipefail
           node scripts/package.mjs --expect-tag "$GITHUB_REF_NAME" | tee "$RUNNER_TEMP/checksums.txt"
-      - name: Test the build provider's snapshot on Java 8
+      - name: Run the declared commands with Maven on Java 8
         env:
-          LITHE_TEST_JAVA: ${{ env.JAVA_HOME_8_X64 }}/bin/java
-        run: node scripts/test-backend.mjs
-      - name: Run the provider and the declared commands with Maven
+          JAVA_HOME: ${{ env.JAVA_HOME_8_X64 }}
         run: node scripts/test.mjs
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          # v0.1.0 was a trial release. v0.1.2 needs a host offering
-          # litheLogging 1, which stable Lithe 0.6.7 lacks. v0.1.3 also
-          # requires pluginFunctions 1, so stable hosts refuse to install it
-          # and the Store's requires map keeps them on 0.1.1.
-          PRERELEASE_TAGS: v0.1.0 v0.1.2
+          # v0.0.1 follows plugin contract v0, which only the new desktop
+          # client installs, and that client ships as desktop-v* pre-releases.
+          PRERELEASE_TAGS: v0.0.1
         run: |
           prerelease=false
           for tag in $PRERELEASE_TAGS; do
             if [[ "$tag" == "$GITHUB_REF_NAME" ]]; then prerelease=true; fi
           done
           {
-            echo "兼容性：需要同时提供 backend 2、pluginFunctions 1、projectGenerators 1 和结构化插件诊断（litheLogging 1）的 Lithe preview 开发版或更新的客户端。稳定版 Lithe 0.6.7 没有 pluginFunctions 1，会拒绝安装 0.1.3；稳定版请继续使用 0.1.1。0.1.2 预览版不再单独说明，由 0.1.3 取代。"
+            echo "兼容性：按插件契约 v0（schemaVersion 0、pluginAPIVersion 0）编写，需要新版 Lithe 桌面端（desktop-v* 预发布）。旧版 macOS Lithe 无法安装。"
             echo
             if [[ -s "docs/releases/$GITHUB_REF_NAME.md" ]]; then
               cat "docs/releases/$GITHUB_REF_NAME.md"
               echo
             fi
             if [[ "$prerelease" == true ]]; then
-              echo "安装：预发布版本，Lithe Store 自动追踪会跳过，暂不收录 Store。下载下面的 ZIP，在 设置 → 插件 的 ⚙ 菜单中选择 从磁盘安装插件…。"
+              echo "安装：预发布版本，Lithe Store 自动追踪会跳过，暂不收录 Store。下载下面的 ZIP，在 设置 → 插件 中点击页面标题栏右侧的 从文件安装…，选中 ZIP 后核对 SHA-256 并确认。"
             else
               echo "安装：Lithe Store（https://github.com/Lithe-IDEA/Lithe-store）中的 Maven 条目合并后，可在 设置 → 插件 → 插件市场 中搜索 Maven 并安装。"
             fi

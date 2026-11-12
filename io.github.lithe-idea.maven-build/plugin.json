@@ -1,36 +1,35 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 0,
   "id": "io.github.lithe-idea.maven-build",
   "displayName": "Maven",
-  "version": "0.1.3",
-  "pluginAPIVersion": 3,
-  "requires": { "backend": 2, "buildProviders": 1, "buildSystems": 1, "pluginFunctions": 1, "projectGenerators": 1, "serverProcess": 1 },
-  "vendor": {
-    "id": "io.github.lithe-idea",
-    "displayName": "Lithe Community",
-    "signatureRequirement": "none"
-  },
-  "permissions": ["backend.launch", "languageServer.launch", "process.build", "project.generate", "workspace.metadata"],
+  "version": "0.0.1",
+  "pluginAPIVersion": 0,
+  "requires": {"buildSystems": 0, "projectGenerators": 0, "settings": 0},
+  "vendor": {"id": "io.github.lithe-idea", "displayName": "Lithe Community", "signatureRequirement": "none"},
+  "permissions": ["process.build", "project.generate"],
   "activationEvents": ["onBuildSystem:maven"],
-  "languages": [],
-  "backend": {
-    "launch": { "kind": "runtime", "tool": "java", "minimumVersion": "8", "entry": "lib/lithe-maven-backend.jar" },
-    "arguments": ["--plugin-backend"]
-  },
-  "pluginFunctions": {
-    "exports": [{ "id": "languageImport.settings", "version": 1, "context": "workspace" }]
-  },
+  "settings": [
+    {
+      "id": "mavenExecutable",
+      "type": "file",
+      "title": "Maven executable",
+      "description": "The mvn program to run. Leave empty to use the project's Maven wrapper (mvnw), then MAVEN_HOME, then mvn on PATH. A path set here is always used, even when the project has a wrapper.",
+      "default": "",
+      "placeholder": "Automatic: mvnw, MAVEN_HOME, PATH",
+      "effect": "reload",
+      "page": {"buildSystemID": "maven"},
+      "section": "Maven"
+    }
+  ],
   "buildSystems": [
     {
       "id": "maven",
       "displayName": "Maven",
-      "icon": { "path": "icons/maven.svg" },
-      "detection": {
-        "markers": ["pom.xml"],
-        "nesting": "outermost"
-      },
+      "icon": {"path": "icons/maven.svg"},
+      "detection": {"markers": ["pom.xml"], "nesting": "outermost"},
       "invocation": {
         "executables": [
+          {"id": "selected", "kind": "setting", "settingID": "mavenExecutable"},
           {
             "kind": "projectFile",
             "path": "mvnw",
@@ -43,12 +42,16 @@
             "requires": [".mvn/wrapper/maven-wrapper.properties"],
             "platforms": ["windows"]
           },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn", "platforms": ["macos", "linux"] },
-          { "kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn.cmd", "platforms": ["windows"] },
-          { "kind": "command", "command": "mvn" }
+          {
+            "kind": "environment",
+            "variable": "MAVEN_HOME",
+            "path": "bin/mvn",
+            "platforms": ["macos", "linux"]
+          },
+          {"kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn.cmd", "platforms": ["windows"]},
+          {"kind": "command", "command": "mvn"}
         ],
         "environmentInputs": ["MAVEN_HOME"],
-        "runtimeDependencies": [{ "id": "java", "minimumVersion": "8" }],
         "globalArguments": [
           "-B",
           "-ntp",
@@ -57,10 +60,16 @@
           "${optionArguments:localRepository}",
           "${optionArguments:offline}"
         ],
-        "version": { "arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)" },
+        "version": {"arguments": ["--version"], "pattern": "Apache Maven (\\d+\\.\\d+\\.\\d+)"},
         "minimumVersion": "3.6.3"
       },
       "options": [
+        {
+          "id": "javaHome",
+          "displayName": "JDK (JAVA_HOME)",
+          "kind": "directory",
+          "environment": {"JAVA_HOME": "${value}"}
+        },
         {
           "id": "profiles",
           "displayName": "Profiles",
@@ -70,7 +79,12 @@
           "presentation": "tree",
           "arguments": ["-P", "${value}"]
         },
-        { "id": "settingsFile", "displayName": "Settings File", "kind": "file", "arguments": ["-s", "${value}"] },
+        {
+          "id": "settingsFile",
+          "displayName": "Settings File",
+          "kind": "file",
+          "arguments": ["-s", "${value}"]
+        },
         {
           "id": "localRepository",
           "displayName": "Local Repository",
@@ -82,7 +96,7 @@
           "displayName": "Offline",
           "kind": "boolean",
           "presentation": "toolbar",
-          "icon": { "path": "icons/offline.svg" },
+          "icon": {"path": "icons/offline.svg"},
           "arguments": ["-o"]
         },
         {
@@ -90,22 +104,22 @@
           "displayName": "Skip Tests",
           "kind": "boolean",
           "presentation": "toolbar",
-          "icon": { "path": "icons/skipTests.svg" },
+          "icon": {"path": "icons/skipTests.svg"},
           "arguments": ["-DskipTests"]
         }
       ],
-      "provider": {
-        "launch": {
-          "kind": "runtime",
-          "tool": "java",
-          "minimumVersion": "8",
-          "entry": "lib/lithe-maven-backend.jar"
-        },
-        "arguments": ["--state", "${workspaceStateDir}"],
+      "model": {
+        "source": "command",
+        "arguments": [
+          "-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar",
+          "-Dlithe.modelOutput=${outputFile}",
+          "pre-clean"
+        ],
+        "output": "outputFile",
+        "decoder": "litheBuildModel",
         "executesProjectCode": true,
         "mayUseNetwork": true
       },
-      "model": { "source": "provider" },
       "tasks": [
         {
           "id": "clean",
@@ -114,8 +128,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "clean"
           ]
         },
@@ -126,8 +140,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "validate"
           ]
         },
@@ -138,8 +152,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "compile"
           ]
         },
@@ -150,8 +164,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "test"
           ]
@@ -163,8 +177,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "package"
           ]
@@ -176,8 +190,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "verify"
           ]
@@ -189,8 +203,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "install"
           ]
@@ -202,8 +216,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "site"
           ]
         },
@@ -214,8 +228,8 @@
           "category": ["Lifecycle"],
           "scopes": ["workspace", "project"],
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "deploy"
           ]
@@ -227,8 +241,8 @@
           "category": ["Plugins"],
           "fromModel": true,
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "${task.property:goal}"
           ]
@@ -240,8 +254,8 @@
           "scopes": ["workspace", "project"],
           "requiresUserArguments": true,
           "arguments": [
-            { "value": "-pl", "when": "nestedProjectSelected" },
-            { "value": "${project.path}", "when": "nestedProjectSelected" },
+            {"value": "-pl", "when": "nestedProjectSelected"},
+            {"value": "${project.path}", "when": "nestedProjectSelected"},
             "${optionArguments:skipTests}",
             "${userArguments}"
           ]
@@ -251,12 +265,15 @@
         "scopes": ["workspace", "project"],
         "filters": ["suite", "case"],
         "arguments": [
-          { "value": "-pl", "when": "nestedProjectSelected" },
-          { "value": "${project.path}", "when": "nestedProjectSelected" },
-          { "value": "-am", "when": ["nestedProjectSelected", "suiteSelected"] },
-          { "value": "-Dtest=${test.suite}", "when": ["suiteSelected", "noCaseSelected"] },
-          { "value": "-Dtest=${test.suite}#${test.case}", "when": ["suiteSelected", "caseSelected"] },
-          { "value": "-Dsurefire.failIfNoSpecifiedTests=false", "when": "suiteSelected" },
+          {"value": "-pl", "when": "nestedProjectSelected"},
+          {"value": "${project.path}", "when": "nestedProjectSelected"},
+          {
+            "value": "-am",
+            "when": ["nestedProjectSelected", "suiteSelected"]
+          },
+          {"value": "-Dtest=${test.suite}", "when": ["suiteSelected", "noCaseSelected"]},
+          {"value": "-Dtest=${test.suite}#${test.case}", "when": ["suiteSelected", "caseSelected"]},
+          {"value": "-Dsurefire.failIfNoSpecifiedTests=false", "when": "suiteSelected"},
           "test"
         ],
         "results": {
@@ -274,7 +291,7 @@
             "column": 4,
             "message": 5,
             "severity": 1,
-            "severities": { "ERROR": "error", "WARNING": "warning" }
+            "severities": {"ERROR": "error", "WARNING": "warning"}
           },
           {
             "regex": "^\\[(ERROR|WARNING)\\] file://(.+?\\.kts?):(\\d+):(\\d+) (.+)$",
@@ -283,13 +300,28 @@
             "column": 4,
             "message": 5,
             "severity": 1,
-            "severities": { "ERROR": "error", "WARNING": "warning" }
+            "severities": {"ERROR": "error", "WARNING": "warning"}
           }
         ]
       },
-      "dependencies": { "source": "provider", "scopes": ["workspace", "project"] },
-      "sync": { "watch": [".mvn/extensions.xml", ".mvn/maven.config", "pom.xml"] },
-      "layout": { "excluded": ["target"] }
+      "dependencies": {
+        "source": "command",
+        "scopes": ["workspace", "project"],
+        "arguments": [
+          "-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar",
+          "-Dlithe.dependenciesOutput=${outputFile}",
+          {"value": "-Dlithe.dependenciesProject=./${project.path}", "when": "projectSelected"},
+          "pre-clean"
+        ],
+        "output": "outputFile",
+        "decoder": "litheDependencies",
+        "executesProjectCode": true,
+        "mayUseNetwork": true
+      },
+      "sync": {
+        "watch": [".mvn/extensions.xml", ".mvn/maven.config", "pom.xml"]
+      },
+      "layout": {"excluded": ["target"]}
     }
   ],
   "projectGenerators": [
@@ -299,21 +331,24 @@
       "description": "A Java project built with Maven.",
       "section": "project",
       "order": 20,
-      "icon": { "path": "icons/maven-project.svg", "darkPath": "icons/maven-project_dark.svg", "mode": "original" },
+      "icon": {"path": "icons/maven-project.svg", "darkPath": "icons/maven-project_dark.svg", "mode": "original"},
       "fields": [
         {
-          "id": "jdk",
-          "type": "runtime",
-          "title": "JDK",
-          "runtime": "java",
-          "minimumVersion": "11"
+          "id": "javaRelease",
+          "type": "enum",
+          "title": "Java release",
+          "description": "The Java release the project compiles for (maven.compiler.release). The JDK that runs Maven must support it.",
+          "presentation": "menu",
+          "default": "17",
+          "options": [
+            {"value": "8", "title": "8"},
+            {"value": "11", "title": "11"},
+            {"value": "17", "title": "17"},
+            {"value": "21", "title": "21"},
+            {"value": "25", "title": "25"}
+          ]
         },
-        {
-          "id": "addSampleCode",
-          "type": "boolean",
-          "title": "Add sample code",
-          "default": true
-        },
+        {"id": "addSampleCode", "type": "boolean", "title": "Add sample code", "default": true},
         {
           "id": "groupId",
           "type": "text",
@@ -335,33 +370,30 @@
           "maxLength": 200
         }
       ],
-      "requirements": [
-        { "languageID": "java" },
-        { "buildSystemID": "maven" }
-      ],
+      "requirements": [{"languageID": "java"}, {"buildSystemID": "maven"}],
       "steps": [
-        { "kind": "files", "source": "templates/java/maven" },
+        {"kind": "files", "source": "templates/java/maven"},
         {
           "kind": "files",
           "source": "templates/java/standard-sample",
-          "when": { "field": "addSampleCode", "equals": true }
+          "when": {"field": "addSampleCode", "equals": true}
         },
         {
           "kind": "files",
           "source": "templates/java/standard-sample-main",
           "target": "src/main/java/${field.groupId|package|path}",
-          "when": { "field": "addSampleCode", "equals": true }
+          "when": {"field": "addSampleCode", "equals": true}
         },
         {
           "kind": "files",
           "source": "templates/java/standard-empty",
-          "when": { "field": "addSampleCode", "equals": false }
+          "when": {"field": "addSampleCode", "equals": false}
         }
       ],
       "openFiles": [
         {
           "path": "src/main/java/${field.groupId|package|path}/Main.java",
-          "when": { "field": "addSampleCode", "equals": true }
+          "when": {"field": "addSampleCode", "equals": true}
         }
       ]
     },
@@ -371,16 +403,8 @@
       "description": "A project generated by Maven from an archetype.",
       "section": "generator",
       "order": 10,
-      "icon": { "path": "icons/maven-project.svg", "darkPath": "icons/maven-project_dark.svg", "mode": "original" },
+      "icon": {"path": "icons/maven-project.svg", "darkPath": "icons/maven-project_dark.svg", "mode": "original"},
       "fields": [
-        {
-          "id": "jdk",
-          "type": "runtime",
-          "title": "JDK",
-          "description": "Maven runs with this JDK, and the new project uses it.",
-          "runtime": "java",
-          "minimumVersion": "11"
-        },
         {
           "id": "archetype",
           "type": "enum",
@@ -388,14 +412,14 @@
           "presentation": "menu",
           "default": "maven-archetype-quickstart",
           "options": [
-            { "value": "maven-archetype-quickstart", "title": "maven-archetype-quickstart" },
-            { "value": "maven-archetype-webapp", "title": "maven-archetype-webapp" },
-            { "value": "maven-archetype-simple", "title": "maven-archetype-simple" },
-            { "value": "maven-archetype-j2ee-simple", "title": "maven-archetype-j2ee-simple" },
-            { "value": "maven-archetype-plugin", "title": "maven-archetype-plugin" },
-            { "value": "maven-archetype-archetype", "title": "maven-archetype-archetype" },
-            { "value": "maven-archetype-site-simple", "title": "maven-archetype-site-simple" },
-            { "value": "custom", "title": "Custom archetype…" }
+            {"value": "maven-archetype-quickstart", "title": "maven-archetype-quickstart"},
+            {"value": "maven-archetype-webapp", "title": "maven-archetype-webapp"},
+            {"value": "maven-archetype-simple", "title": "maven-archetype-simple"},
+            {"value": "maven-archetype-j2ee-simple", "title": "maven-archetype-j2ee-simple"},
+            {"value": "maven-archetype-plugin", "title": "maven-archetype-plugin"},
+            {"value": "maven-archetype-archetype", "title": "maven-archetype-archetype"},
+            {"value": "maven-archetype-site-simple", "title": "maven-archetype-site-simple"},
+            {"value": "custom", "title": "Custom archetype…"}
           ]
         },
         {
@@ -405,7 +429,7 @@
           "pattern": "[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*",
           "maxLength": 200,
           "placeholder": "org.example.archetypes",
-          "visibleWhen": { "field": "archetype", "equals": "custom" }
+          "visibleWhen": {"field": "archetype", "equals": "custom"}
         },
         {
           "id": "archetypeArtifactId",
@@ -414,7 +438,7 @@
           "pattern": "[A-Za-z0-9_][A-Za-z0-9_.-]*",
           "maxLength": 200,
           "placeholder": "my-archetype",
-          "visibleWhen": { "field": "archetype", "equals": "custom" }
+          "visibleWhen": {"field": "archetype", "equals": "custom"}
         },
         {
           "id": "archetypeVersion",
@@ -463,10 +487,7 @@
           "maxLength": 200
         }
       ],
-      "requirements": [
-        { "languageID": "java" },
-        { "buildSystemID": "maven" }
-      ],
+      "requirements": [{"languageID": "java"}, {"buildSystemID": "maven"}],
       "steps": [
         {
           "kind": "command",
@@ -475,17 +496,31 @@
             "-B",
             "org.apache.maven.plugins:maven-archetype-plugin:3.3.1:generate",
             "-DinteractiveMode=false",
-            { "value": "-DarchetypeGroupId=org.apache.maven.archetypes", "when": { "field": "archetype", "notEquals": "custom" } },
-            { "value": "-DarchetypeArtifactId=${field.archetype}", "when": { "field": "archetype", "notEquals": "custom" } },
-            { "value": "-DarchetypeGroupId=${field.archetypeGroupId}", "when": { "field": "archetype", "equals": "custom" } },
-            { "value": "-DarchetypeArtifactId=${field.archetypeArtifactId}", "when": { "field": "archetype", "equals": "custom" } },
-            { "value": "-DarchetypeVersion=${field.archetypeVersion}", "when": { "field": "archetypeVersion", "notEquals": "" } },
+            {
+              "value": "-DarchetypeGroupId=org.apache.maven.archetypes",
+              "when": {"field": "archetype", "notEquals": "custom"}
+            },
+            {
+              "value": "-DarchetypeArtifactId=${field.archetype}",
+              "when": {"field": "archetype", "notEquals": "custom"}
+            },
+            {
+              "value": "-DarchetypeGroupId=${field.archetypeGroupId}",
+              "when": {"field": "archetype", "equals": "custom"}
+            },
+            {
+              "value": "-DarchetypeArtifactId=${field.archetypeArtifactId}",
+              "when": {"field": "archetype", "equals": "custom"}
+            },
+            {
+              "value": "-DarchetypeVersion=${field.archetypeVersion}",
+              "when": {"field": "archetypeVersion", "notEquals": ""}
+            },
             "-DgroupId=${field.groupId}",
             "-DartifactId=${field.artifactId}",
             "-Dversion=${field.version}",
             "-Dpackage=${field.packageName}"
           ],
-          "environment": { "JAVA_HOME": "${field.jdk}" },
           "collect": "${field.artifactId}",
           "mayUseNetwork": true,
           "timeoutSeconds": 900

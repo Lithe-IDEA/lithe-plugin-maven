@@ -63,7 +63,7 @@ final class DependencyExport {
         }
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("format", "litheDependencies");
-        document.put("version", 1);
+        document.put("version", 0);
         document.put("dependencies", dependencies);
         return document;
     }

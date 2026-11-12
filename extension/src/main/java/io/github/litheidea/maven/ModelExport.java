@@ -84,7 +84,7 @@ final class ModelExport {
         optionValues.put("profiles", new ArrayList<>(profileIds()));
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("format", "litheBuildModel");
-        document.put("version", 1);
+        document.put("version", 0);
         document.put("projects", projects);
         document.put("tasks", tasks);
         document.put("contentRoots", contentRoots);
