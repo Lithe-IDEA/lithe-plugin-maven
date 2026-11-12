@@ -2,22 +2,18 @@
 // Packages the plugin into dist/<name>-<version>-darwin.zip, the asset name
 // Lithe Store's release tracker recognizes (docs/publishing.md there).
 //
-// The package is plain data plus two jars, built here with Maven and copied
-// to lib/: the Maven core extension in extension/, which runs inside the
-// user's own Maven, and the build provider in backend/, which Lithe starts
-// with Java 8 or newer. Neither carries native code, so one archive serves
-// every Mac. The unpacked package stays in dist/package/ for installing a
-// local development copy into Lithe.
-//
-// The backend compiles the official SDK sources pinned by sdk.lock.json into
-// the same JAR. Every input is verified before Maven runs; build outputs and
-// plugin runtime state never become part of the source lock.
+// The package is plain data plus one jar, built here with Maven and copied to
+// lib/: the Maven core extension in extension/. Lithe never starts it; the
+// model and dependency commands in plugin.json load it into the user's own
+// Maven with -Dmaven.ext.class.path, and it writes the canonical documents
+// Lithe decodes. It carries no native code, so one archive serves every Mac.
+// The unpacked package stays in dist/package/ for installing a local
+// development copy into Lithe.
 //
 // Usage: node scripts/package.mjs [--expect-tag <tag>]
 
 import { mavenTimeout, runCommand, withInterrupts, ZIP_TIMEOUT_MS } from "./process.mjs";
 import { createReport } from "./report.mjs";
-import { verifySdk } from "./sdk/verify-sdk.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -26,7 +22,6 @@ const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
 const ASSET_PREFIX = "maven-build";
 const PLATFORM = "darwin";
 const EXTENSION_JAR = "extension/target/lithe-maven-extension.jar";
-const BACKEND_JAR = "backend/target/lithe-maven-backend.jar";
 const PACKAGE_ROOT = join("dist", "package");
 
 const manifest = JSON.parse(readFileSync(`${PACKAGE_DIR}/plugin.json`, "utf8"));
@@ -34,8 +29,6 @@ const extensionPom = readFileSync("extension/pom.xml", "utf8");
 const pomVersion = (pom, artifact) => new RegExp(`<artifactId>${artifact}</artifactId>\\s*(?:<!--.*?-->\\s*)?<version>([^<]+)</version>`, "s")
   .exec(pom)?.[1];
 const extensionVersion = pomVersion(extensionPom, "lithe-maven-extension");
-const backendPom = readFileSync("backend/pom.xml", "utf8");
-const backendVersion = pomVersion(backendPom, "lithe-maven-backend");
 const problems = [];
 if (manifest.id !== PACKAGE_DIR) problems.push(`plugin.json id ${manifest.id} must equal the directory ${PACKAGE_DIR}`);
 if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(manifest.version)) problems.push(`version ${manifest.version} is not MAJOR.MINOR.PATCH`);
@@ -43,9 +36,6 @@ if (manifest.vendor?.signatureRequirement !== "none") problems.push('vendor.sign
 if (manifest.id === "dev.lithe" || manifest.id.startsWith("dev.lithe.")) problems.push("dev.lithe.* is reserved for official plugins");
 if (extensionVersion !== manifest.version) {
   problems.push(`extension/pom.xml version ${extensionVersion} must equal plugin.json version ${manifest.version}`);
-}
-if (backendVersion !== manifest.version) {
-  problems.push(`backend/pom.xml version ${backendVersion} must equal plugin.json version ${manifest.version}`);
 }
 
 const tagFlag = process.argv.indexOf("--expect-tag");
@@ -92,17 +82,9 @@ const report = createReport("package");
 const timeoutMs = mavenTimeout();
 await withInterrupts(async (signal) => {
   try {
-    await report.step("verify the vendored plugin SDK", verifySdk);
     await report.step("build the Maven extension", async () => {
       await runCommand(process.env.MVN ?? "mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { timeoutMs, signal });
       if (!existsSync(EXTENSION_JAR)) throw new Error(`${EXTENSION_JAR} was not built`);
-    });
-
-    await report.step("build the Maven backend", async () => {
-      await runCommand(process.env.MVN ?? "mvn", [
-        "-B", "-ntp", "-q", "-f", "backend/pom.xml", "clean", "package",
-      ], { timeoutMs, signal });
-      if (!existsSync(BACKEND_JAR)) throw new Error(`${BACKEND_JAR} was not built`);
     });
 
     await report.step("assemble the plugin package", () => {
@@ -112,10 +94,8 @@ await withInterrupts(async (signal) => {
       cpSync(PACKAGE_DIR, packageRoot, { recursive: true });
       mkdirSync(join(packageRoot, "lib"), { recursive: true });
       cpSync(EXTENSION_JAR, join(packageRoot, "lib", "lithe-maven-extension.jar"));
-      cpSync(BACKEND_JAR, join(packageRoot, "lib", "lithe-maven-backend.jar"));
       cpSync("LICENSE", join(packageRoot, "LICENSE"));
       cpSync("NOTICE", join(packageRoot, "NOTICE"));
-      cpSync("vendor/LICENSE", join(packageRoot, "SDK-LICENSE"));
       assertNoLinks(packageRoot);
     });
 

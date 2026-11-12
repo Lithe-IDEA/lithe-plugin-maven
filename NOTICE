@@ -17,8 +17,3 @@ resources, moved from the Java Support plugin), under the Apache License,
 Version 2.0. Their exact file paths and revision are not recorded.
 
 Copyright 2000-2024 JetBrains s.r.o. and contributors.
-
-The backend includes the Apache-2.0 licensed official Lithe Java plugin SDK
-from Lithe-IDEA/lithe-plugin-docs. Its production sources and LICENSE are
-vendored in vendor/, with upstream base revision, local structured logging
-changes and exact SHA-256 per input recorded in sdk.lock.json.

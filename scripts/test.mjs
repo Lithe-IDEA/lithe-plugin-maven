@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Runs test/fixtures/reactor with a real Maven: the model and dependency
-// trees through the packaged build provider (lib/lithe-maven-backend.jar,
-// which runs Maven with the extension), and the commands plugin.json
-// declares. It checks the documents Lithe receives; Lithe's own tests decode
-// them, this script makes sure Maven produces them. The provider's caching is
-// covered by scripts/test-backend.mjs with a fake Maven.
+// Runs test/fixtures/reactor with a real Maven, the way Lithe runs the
+// commands plugin.json declares: the model and dependency commands load
+// lib/lithe-maven-extension.jar into Maven and write the documents Lithe
+// decodes to ${outputFile}; the test command runs a filtered suite. It checks
+// the documents Lithe receives; Lithe's own tests decode them, this script
+// makes sure Maven produces them.
 //
 // Run scripts/package.mjs first. MVN selects the Maven executable (default
-// `mvn`), so CI can also check the oldest supported Maven; LITHE_TEST_JAVA
-// the Java that runs the provider (default `java`).
+// `mvn`), so CI can also check the oldest supported Maven; JAVA_HOME selects
+// the Java that runs it, as the JDK build option does in Lithe.
 //
 // LITHE_CAPTURE_DIR=<dir> also copies the documents there, with the
 // scratch workspace written as `${workspace}`, for Lithe's Core tests.
@@ -16,8 +16,6 @@
 // Usage: node scripts/test.mjs
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { BackendClient, bounded } from "./backend-client.mjs";
 import { mavenTimeout, runCommand, withInterrupts } from "./process.mjs";
 import { createReport } from "./report.mjs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -27,7 +25,7 @@ import { join, resolve } from "node:path";
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
 const pluginDir = resolve("dist", "package", PACKAGE_DIR);
 const maven = process.env.MVN ?? "mvn";
-if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar")) || !existsSync(join(pluginDir, "lib", "lithe-maven-backend.jar"))) {
+if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar"))) {
   console.error("✗ dist/package is missing; run node scripts/package.mjs first");
   process.exit(1);
 }
@@ -39,7 +37,7 @@ const buildSystem = manifest.buildSystems[0];
  * option has a value, so `${optionArguments:…}` contributes nothing, and a
  * conditional argument is kept when its conditions hold.
  */
-function expand(list, { project, suite }) {
+function expand(list, { project, suite, outputFile }) {
   const conditions = {
     projectSelected: project !== undefined,
     noProjectSelected: project === undefined,
@@ -57,6 +55,7 @@ function expand(list, { project, suite }) {
     result.push(
       value
         .replaceAll("${pluginDir}", pluginDir)
+        .replaceAll("${outputFile}", outputFile ?? "")
         .replaceAll("${project.path}", project ?? "")
         .replaceAll("${test.suite}", suite ?? ""),
     );
@@ -75,6 +74,7 @@ function run(name, root, list, signal, values = {}) {
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
 const root = join(scratch, "reactor");
+const outputs = join(scratch, "outputs");
 const captureDir = process.env.LITHE_CAPTURE_DIR;
 function capture(name, document) {
   if (!captureDir) return;
@@ -94,47 +94,31 @@ const check = async (name, body) => {
   }
 };
 
-/** The executable Lithe would pass as tool.executable: MVN, or `mvn` on PATH. */
-function mavenExecutable() {
-  if (maven.includes("/")) return resolve(maven);
-  const found = spawnSync("/bin/sh", ["-c", 'command -v "$0"', maven], { encoding: "utf8" }).stdout.trim();
-  if (!found) throw new Error(`${maven} is not on PATH`);
-  return found;
+/**
+ * Runs a declared command that writes its document to ${outputFile}, as the
+ * model and dependency commands do, and returns the parsed document. Like
+ * Lithe, it reads the file only after Maven exits successfully.
+ */
+async function document(name, declaration, signal, values = {}) {
+  assert.equal(declaration.source, "command");
+  assert.equal(declaration.output, "outputFile");
+  const outputFile = join(outputs, `${name.replaceAll(/[^A-Za-z0-9]+/g, "-")}.json`);
+  await run(name, root, declaration.arguments, signal, { ...values, outputFile });
+  return JSON.parse(readFileSync(outputFile, "utf8"));
 }
 
 async function test(signal) {
-  let backend;
-  const stopBackend = () => backend?.kill();
-  signal.addEventListener("abort", stopBackend, { once: true });
   try {
     cpSync(resolve("test", "fixtures", "reactor"), root, { recursive: true });
+    mkdirSync(outputs);
 
-    backend = new BackendClient({
-      java: process.env.LITHE_TEST_JAVA ?? "java",
-      jar: join(pluginDir, "lib", "lithe-maven-backend.jar"),
-      state: join(scratch, "state"),
-      timeoutMs,
-    });
-    await report.step("start the build provider", () => backend.initialize(root));
-    const params = (extra = {}) => ({
-      buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
-      tool: { executable: mavenExecutable() }, ...extra,
-    });
-    const model = await report.step("read the reactor model", () => backend.request("lithe/build/model", params()));
+    const model = await document("read the reactor model", buildSystem.model, signal);
     capture("model.json", model);
-    await check("model diagnostics use one typed terminal without Maven output", async () => {
-      const terminals = backend.diagnostics.filter((entry) => entry.operation === "lithe/build/model");
-      assert.equal(terminals.length, 1);
-      assert.equal(terminals[0].kind, "operationFinished");
-      assert.ok(Number.isSafeInteger(terminals[0].durationMs) && terminals[0].durationMs >= 0);
-      assert.deepEqual(Object.keys(terminals[0]).sort(), ["durationMs", "kind", "operation", "operationId"]);
-      assert.equal(terminals[0].operationId, "2");
-      assert.equal(backend.stderr, "");
-    });
     const byName = (name) => model.projects.find((project) => project.name === name);
 
     await check("the model lists the reactor and its aggregator tree", () => {
       assert.equal(model.format, "litheBuildModel");
+      assert.equal(model.version, 0);
       assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app"]);
       assert.equal(byName("reactor").displayName, "Demo Reactor");
       assert.equal(byName("core").parent, byName("reactor").path);
@@ -172,19 +156,16 @@ async function test(signal) {
       assert.ok(!model.contentRoots.some((entry) => entry.project === byName("reactor").path));
     });
 
-    const projectDependencies = await report.step("read project dependencies", () => backend.request(
-      "lithe/build/dependencies", params({ project: { name: "app", path: "app" } }),
-    ));
+    const projectDependencies = await document("read project dependencies", buildSystem.dependencies, signal, { project: "app" });
     capture("app-dependencies.json", projectDependencies);
     await check("a project's tree resolves an uninstalled sibling from the reactor", () => {
       const tree = projectDependencies;
       assert.equal(tree.format, "litheDependencies");
+      assert.equal(tree.version, 0);
       assert.deepEqual(tree.dependencies.map((node) => [node.group, node.name, node.scope]), [["demo", "core", "compile"]]);
     });
 
-    const workspaceDependencies = await report.step("read workspace dependencies", () => backend.request(
-      "lithe/build/dependencies", params({ project: null }),
-    ));
+    const workspaceDependencies = await document("read workspace dependencies", buildSystem.dependencies, signal);
     capture("dependencies.json", workspaceDependencies);
     await check("the workspace tree has one node per project with transitive children", () => {
       const tree = workspaceDependencies;
@@ -192,13 +173,6 @@ async function test(signal) {
       const junit = tree.dependencies[1].children[0];
       assert.deepEqual([junit.name, junit.version, junit.scope], ["junit", "4.13.2", "test"]);
       assert.equal(junit.children[0].name, "hamcrest-core");
-    });
-
-    await check("one Maven run serves the model and every tree, and is saved for the next start", async () => {
-      const saved = JSON.parse(readFileSync(join(scratch, "state", "maven-snapshot.json"), "utf8")).value;
-      assert.equal(saved.snapshotVersion, 1);
-      assert.deepEqual(saved.roots[root].model, model);
-      assert.equal(await backend.close(), 0);
     });
 
     await check("reading the model and dependencies builds nothing", () => {
@@ -223,13 +197,7 @@ async function test(signal) {
     failed = true;
     report.failure("integration lane failed", error);
     console.error(error.stack);
-    if (backend) console.error(`build provider stderr:\n${backend.stderr}`);
   } finally {
-    signal.removeEventListener("abort", stopBackend);
-    if (backend) {
-      backend.kill();
-      await bounded(backend.exited, "the build provider to end").catch(() => {});
-    }
     try { await report.step("remove the scratch reactor", () => rmSync(scratch, { recursive: true, force: true })); }
     finally { report.write(); }
   }
