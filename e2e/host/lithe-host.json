@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/1lck/Lithe-IDEA.git",
+  "revision": "059d878d4284e1a1fd218aeaa56c29d9753d4dfa",
+  "packages": {
+    "./internal/workbench": "^TestOfficialMavenPluginBuildsAReactor$",
+    "./internal/projectgen": "^TestMavenPlugin"
+  },
+  "requiredEnvironment": {
+    "LITHE_TEST_MAVEN_PLUGIN_ARCHIVE": "maven-build-<version>-darwin.zip to install, for example dist/maven-build-0.0.1-darwin.zip",
+    "LITHE_PLUGIN_MAVEN_DIR": "directory holding the plugin.json and templates; defaults to this repository's"
+  },
+  "repositoryEnvironment": {
+    "LITHE_PLUGIN_MAVEN_DIR": "io.github.lithe-idea.maven-build"
+  }
+}
