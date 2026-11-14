@@ -209,3 +209,7 @@ LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" node
 ## 许可
 
 [Apache-2.0](LICENSE)。图标来自 IntelliJ Platform，见 [NOTICE](NOTICE)。
+
+## Linux ARM64 / x64
+
+Linux 构建、资源归属与原生验证入口见 [Linux 构建与验证](docs/linux-packaging.md)。

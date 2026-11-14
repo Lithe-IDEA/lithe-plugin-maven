@@ -10,13 +10,14 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         # The runner's Maven, and the oldest version plugin.json accepts.
         maven: [runner, 3.6.3]
+        os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,8 +48,10 @@ jobs:
       - name: Run the declared commands with Maven
         env:
           # The oldest Maven also runs on the oldest Java.
-          JAVA_HOME: ${{ matrix.maven == 'runner' && env.JAVA_HOME || env.JAVA_HOME_8_X64 }}
+          JAVA_HOME: ${{ matrix.maven == 'runner' && env.JAVA_HOME || env[format('JAVA_HOME_8_{0}', runner.arch)] }}
         run: node scripts/test.mjs
+      - name: Verify Linux release archives
+        run: node --test --test-timeout=60000 scripts/package/*.test.mjs
       - name: Validate against Lithe Store rules
         if: matrix.maven == 'runner'
         run: |
@@ -70,6 +73,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: script-timings-maven-${{ matrix.maven }}
+          name: script-timings-maven-${{ matrix.maven }}-${{ runner.arch }}
           path: .artifacts/test-stability/
           if-no-files-found: warn

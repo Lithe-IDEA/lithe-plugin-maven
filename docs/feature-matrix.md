@@ -165,3 +165,12 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 
 **验证方法**（macOS）：在新建项目窗口分别用两个条目生成项目，检查表单默认值、生成的文件和打开的文件；
 生成的 Maven 项目能直接 `mvn package`；取消或失败时目标目录不留下半成品。
+
+## Linux 安装包
+
+| 能力 | Linux ARM64 | Linux x64 | 验证入口 |
+| --- | --- | --- | --- |
+| 构建与安装包 | [已实现并通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | [已实现并通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | `.github/workflows/ci.yml`、[资源说明](linux-packaging.md) |
+| 真实工具/语言服务器流程 | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | `scripts/package/` 和现有集成测试 |
+
+跨架构本地包检查通过不等于原生工作流验收。既有平台验证记录保持不变。
