@@ -2,9 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {readFileSync,mkdtempSync,rmSync,statSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 const id="io.github.lithe-idea.maven-build";
 const version=JSON.parse(readFileSync(`${id}/plugin.json`)).version;
