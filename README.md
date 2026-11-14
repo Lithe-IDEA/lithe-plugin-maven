@@ -22,6 +22,7 @@
 | 自定义目标 | “Run Maven Goal…” 输入任意目标和参数 |
 | 测试 | 运行模块、测试类或单个方法，读取 Surefire/Failsafe 的 JUnit XML 报告 |
 | 诊断 | 把编译输出中的 `[ERROR]`/`[WARNING] 文件:[行,列]` 显示为问题 |
+| 彩色输出 | 每条 Maven 命令都带 `-Dstyle.color=always`，即使输出不是终端也保留 Maven 的颜色；Lithe 的构建、运行和测试控制台按颜色显示 `[INFO]`、`[WARNING]`、`[ERROR]` 和 `BUILD SUCCESS`，匹配诊断前会先去掉颜色转义 |
 | 依赖 | 显示整个反应堆或单个模块的依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
 

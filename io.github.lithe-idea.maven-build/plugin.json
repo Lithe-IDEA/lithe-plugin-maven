@@ -55,6 +55,7 @@
         "globalArguments": [
           "-B",
           "-ntp",
+          "-Dstyle.color=always",
           "${optionArguments:profiles}",
           "${optionArguments:settingsFile}",
           "${optionArguments:localRepository}",
