@@ -113,6 +113,9 @@ scripts/package.mjs                            # 构建扩展并打包成 dist/m
 scripts/test.mjs                               # 用真实 Maven 运行清单里的模型、依赖和测试命令并检查输出
 scripts/test-process.mjs                       # 进程超时、中断和清理回归，不需要 Maven
 scripts/verify-scripts.mjs                     # 在临时副本里打包和测试，检查已有包和宿主 bundle 不被改动
+scripts/e2e-host.mjs                           # 在固定版本的宿主里运行 e2e/host/ 的测试
+e2e/host/                                      # 宿主端到端测试和宿主版本固定文件 lithe-host.json
+docs/feature-matrix.md                         # 插件自己的功能矩阵
 .github/workflows/ci.yml                       # PR 时打包、用 Maven 3.6.3 和最新版测试，并用 Lithe Store 的规则检查
 .github/workflows/release.yml                  # 推送 v<版本> 标签时发布 GitHub Release
 docs/releases/v<版本>.md                       # 该版本的变化，发布时并入 Release 说明（可选）
@@ -153,6 +156,39 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 `plugin.json` 的完整格式见 Rust Core 仓库里的
 [插件契约](https://github.com/Lithe-IDEA/Lithe-core-rust/blob/main/shared/plugins/contract/v1/README.md)
 和[构建工具接入指南](https://github.com/Lithe-IDEA/Lithe-core-rust/blob/main/shared/plugins/guides/build-tool-integration.md)。
+
+## 宿主端到端测试
+
+`e2e/host/` 里的测试用 Lithe 桌面端自己的测试工具装上插件包，在真实的宿主和 Rust Core 里检查插件：
+
+- `TestOfficialMavenPluginBuildsAReactor`（宿主的 `desktop/internal/workbench` 包）：读取两模块反应堆的模型和依赖树，
+  改 Maven executable 设置后重新读取并运行 `compile`，最后确认插件安装目录没有被写入。
+- `TestMavenPluginProjectGeneratesABuildableMavenProject`、`TestMavenPluginArchetypeRunsRealMaven`（`desktop/internal/projectgen` 包）：
+  用清单里的两个新建项目条目生成项目。
+
+这些测试原来放在 Lithe 主仓库，按“宿主不依赖插件”的要求（[1lck/Lithe-IDEA#1915](https://github.com/1lck/Lithe-IDEA/pull/1915)）
+移到这里：主仓库不读取本仓库，`e2e/host/lithe-host.json` 记录测试最后一次通过时的宿主版本。
+
+需要 Node.js 22+、Go、Rust 工具链（构建宿主固定的 Rust Core）、`git` 和 `PATH` 上的 `mvn`：
+
+```bash
+node scripts/package.mjs
+LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" node scripts/e2e-host.mjs
+```
+
+- `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE` 必须设置，脚本不会因为缺少插件包而跳过测试。
+- 新建项目测试读取 `LITHE_PLUGIN_MAVEN_DIR` 里的 `plugin.json` 和模板，默认是本仓库的 `io.github.lithe-idea.maven-build/`。
+- 原型测试要从 Maven Central 下载原型插件，只在设置了 `LITHE_INTEGRATION_NETWORK=1` 和 `JAVA_HOME` 时运行，否则跳过。
+
+脚本把固定版本的宿主（只取 `desktop/` 和 `scripts/`）检出到 `.artifacts/lithe-host`，复制 `e2e/host/desktop/` 下的测试，
+再在那里运行宿主的 `scripts/desktop/desktop-go.sh test`；第一次运行会克隆并构建 Rust Core，`LITHE_CORE_RUST_DIR`
+可以指向本地的 Core 检出。`--ref <分支或 commit>` 换一个宿主版本试跑，`--run <正则>` 只跑部分测试。
+测试用的是宿主内部的测试工具，升级 `lithe-host.json` 的 `revision` 时可能要同步修改测试。
+
+## 功能矩阵
+
+插件能力在各平台的实现和验证状态记录在 [docs/feature-matrix.md](docs/feature-matrix.md)，Lithe 主仓库的功能矩阵不再收录插件能力。
+改动插件行为的 PR 同时更新这一页。
 
 ## 发布新版本
 
