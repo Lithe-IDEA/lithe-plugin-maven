@@ -9,7 +9,7 @@
 > plugin goals, profiles, test runs with JUnit reports, compiler diagnostics and the dependency tree. Lithe runs your
 > own Maven with a small bundled core extension that only reads the reactor; the plugin has no backend process.
 
-> **预发布**：按插件契约 v0（`schemaVersion: 0`、`pluginAPIVersion: 0`）编写，只能装进新版 Lithe 桌面端
+> **兼容性**：按插件契约 v0（`schemaVersion: 0`、`pluginAPIVersion: 0`）编写，只能装进新版 Lithe 桌面端
 > （`desktop-v*` 预发布），旧版 macOS Lithe 无法安装。
 
 ## 功能
@@ -205,7 +205,7 @@ LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" node
    ```
 
 3. `Release` 工作流会核对标签与版本、打包、测试并发布 Release（说明里附 SHA-256）。`release.yml` 里
-   `PRERELEASE_TAGS` 列出的版本会标为预发布版本：目前是只能装进新版桌面端的 `v0.0.1`。
+   `PRERELEASE_TAGS` 列出的版本会标为预发布版本：目前是 `v0.0.1` 和 `v0.2.0`；`v0.2.1` 起作为正式版本发布。
 4. Lithe Store 的自动追踪会发现稳定版本并开合并请求，合并后用户即可在 Lithe 中更新。自动追踪会跳过预发布版本；
    需要收录时在 Store 中手工提交条目，并使用已发布 ZIP 的实际 SHA-256。
 

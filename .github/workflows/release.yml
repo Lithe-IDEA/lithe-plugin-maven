@@ -43,7 +43,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # v0.0.1 follows plugin contract v0, which only the new desktop
           # client installs, and that client ships as desktop-v* pre-releases.
-          PRERELEASE_TAGS: v0.0.1 v0.2.0 v0.2.1
+          # v0.2.1 is published as a stable release so the Store tracker lists it.
+          PRERELEASE_TAGS: v0.0.1 v0.2.0
         run: |
           prerelease=false
           for tag in $PRERELEASE_TAGS; do
