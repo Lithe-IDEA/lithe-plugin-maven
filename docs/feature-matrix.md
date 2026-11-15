@@ -181,8 +181,8 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 
 | 能力 | Windows ARM64 | Windows x64 | 验证入口 |
 | --- | --- | --- | --- |
-| 构建与安装包 | 已实现（同一份包）；没有原生 CI | 已实现；原生 CI 待通过 | `.github/workflows/ci.yml` 的 `windows` 任务、[资源说明](windows-packaging.md) |
-| 真实 Maven 流程（`mvn.cmd`） | 没有原生 CI | 原生 CI 待通过（runner 自带 Maven 和 3.6.3 + Java 8） | `scripts/test.mjs`（`LITHE_TEST_PLUGIN_DIR` 指向解压后的 Windows 包） |
+| 构建与安装包 | 已实现（同一份包）；没有原生 CI | 已实现；[已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43728100763) | `.github/workflows/ci.yml` 的 `windows` 任务、[资源说明](windows-packaging.md) |
+| 真实 Maven 流程（`mvn.cmd`） | 没有原生 CI | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43728100763)（runner 自带 Maven 和 3.6.3 + Java 8） | `scripts/test.mjs`（`LITHE_TEST_PLUGIN_DIR` 指向解压后的 Windows 包） |
 
 包里只有声明资源和纯 Java 的扩展 JAR，ARM64 与 x64 的差别只在用户自己的 JDK 和 Maven，所以 ARM64 用同一份包，
 但在原生 ARM64 CI 或手工验收通过前不宣称通过。
