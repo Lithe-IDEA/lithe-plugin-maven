@@ -69,9 +69,9 @@ final class DependencyExport {
     }
 
     private MavenProject project(String projectPath) throws MavenExecutionException {
-        String wanted = ModelExport.path(new File(session.getExecutionRootDirectory(), projectPath));
+        String wanted = ModelExport.key(new File(session.getExecutionRootDirectory(), projectPath));
         for (MavenProject project : session.getProjects()) {
-            if (ModelExport.path(project.getBasedir()).equals(wanted)) {
+            if (ModelExport.key(project.getBasedir()).equals(wanted)) {
                 return project;
             }
         }
