@@ -16,7 +16,7 @@
 只有按“验证方法”完整走过一遍，并写明日期、插件版本和宿主版本，才能标 `verified`。
 自动化测试的结果写在“最近验证”里，不能代替验收。
 
-Windows 一列目前都是 `missing`：插件只发布 `maven-build-<版本>-darwin.zip`（`scripts/package.mjs`），没有 Windows 包。
+Windows 现新增 `maven-build-<版本>-windows.zip`，与 macOS/Linux 使用相同的便携 Java 资源；下表旧工作流的完整原生验收状态保持不变。
 
 ## 总览
 
@@ -174,3 +174,12 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 | 真实工具/语言服务器流程 | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43619370315) | `scripts/package/` 和现有集成测试 |
 
 跨架构本地包检查通过不等于原生工作流验收。既有平台验证记录保持不变。
+
+## 原生编译设置与本地 JAR
+
+| 能力 | macOS | Windows | 证据 |
+| --- | --- | --- | --- |
+| 项目默认目标、按模块字节码、继承与显式保存 | implemented / pending | implemented / pending | `scripts/compiler/` 真实引擎回归，检查 class major 52/55；原生完整 UI 验收仍 pending |
+| 原生 JAR 引用与编译运行 | implemented / pending | implemented / pending | `scripts/compiler/` 编译外部 JAR 并运行引用它的程序；配置与包的只读边界见 native-settings.md |
+
+2026-11-15：本地 macOS 自动化已通过，不将脚本通过等同于所有交互场景验收。Windows 的实机结果另随 PR 补充。

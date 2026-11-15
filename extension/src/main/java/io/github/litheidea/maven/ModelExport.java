@@ -73,6 +73,11 @@ final class ModelExport {
             properties.put("artifactId", project.getArtifactId());
             properties.put("version", project.getVersion());
             properties.put("packaging", project.getPackaging());
+            compilerFacts(project, properties);
+            if(project.getParent()!=null){
+                Map<String,Object> inherited=new LinkedHashMap<>();compilerFacts(project.getParent(),inherited);
+                for(String key:new String[]{"target","releaseEnabled","debug","showDeprecation","showWarnings","arguments"})if(inherited.containsKey("compiler."+key))properties.put("compiler.inherited."+key,inherited.get("compiler."+key));
+            }
             entry.put("properties", properties);
             projects.add(entry);
             if (!"pom".equals(project.getPackaging())) {
@@ -179,6 +184,49 @@ final class ModelExport {
                 task.put("properties", properties);
                 tasks.add(task);
             }
+        }
+    }
+
+    /** Query Maven's merged plugin model and native parameter evaluator. No
+     * module/configuration model is inferred by the desktop or the backend. */
+    private void compilerFacts(MavenProject project, Map<String,Object> output) {
+        Plugin compiler=null;
+        for(Plugin candidate:project.getBuildPlugins()) if("maven-compiler-plugin".equals(candidate.getArtifactId())) {compiler=candidate.clone();break;}
+        if(compiler==null) return;
+        try {
+            if(compiler.getVersion()==null) compiler.setVersion(versionResolver.resolve(new DefaultPluginVersionRequest(compiler,session)).getVersion());
+            PluginDescriptor descriptor=pluginManager.getPluginDescriptor(compiler,project.getRemotePluginRepositories(),session.getRepositorySession());
+            MojoDescriptor mojo=descriptor.getMojo("compile");
+            org.apache.maven.plugin.MojoExecution execution=new org.apache.maven.plugin.MojoExecution(mojo,"default-compile");
+            org.codehaus.plexus.util.xml.Xpp3Dom merged=project.getGoalConfiguration("org.apache.maven.plugins","maven-compiler-plugin","default-compile","compile");
+            execution.setConfiguration(merged);
+            org.apache.maven.plugin.PluginParameterExpressionEvaluator evaluator=new org.apache.maven.plugin.PluginParameterExpressionEvaluator(session,execution);
+            for(String key:new String[]{"source","target","release","debug","showDeprecation","showWarnings"}) {
+                org.codehaus.plexus.util.xml.Xpp3Dom node=merged==null?null:merged.getChild(key);
+                Object value=node==null?null:evaluator.evaluate(node.getValue());
+                if(value==null) value=project.getProperties().getProperty("maven.compiler."+key);
+                if(value==null && mojo.getMojoConfiguration()!=null) {
+                    org.codehaus.plexus.configuration.PlexusConfiguration defaults=mojo.getMojoConfiguration().getChild(key,false);
+                    if(defaults!=null) {
+                        String expression=defaults.getValue(null);
+                        if(expression!=null) value=evaluator.evaluate(expression);
+                        if(value==null || value.toString().contains("${")) value=defaults.getAttribute("default-value",null);
+                    }
+                }
+                if(value!=null&&!value.toString().contains("${")) output.put("compiler."+key,value.toString());
+            }
+            List<String> arguments=new ArrayList<>();
+            org.codehaus.plexus.util.xml.Xpp3Dom args=merged==null?null:merged.getChild("compilerArgs");
+            if(args!=null) for(org.codehaus.plexus.util.xml.Xpp3Dom arg:args.getChildren()) {
+                Object evaluated=evaluator.evaluate(arg.getValue());
+                if(evaluated!=null) arguments.add(evaluated.toString());
+            }
+            output.put("compiler.arguments",Json.write(arguments));
+            Object release=output.get("compiler.release");
+            output.put("compiler.releaseEnabled",Boolean.toString(release!=null&&!release.toString().isEmpty()));
+            if(release!=null&&!release.toString().isEmpty()) output.put("compiler.target",release.toString());
+        } catch(Exception failure) {
+            throw new IllegalStateException("Maven compiler settings could not be evaluated.",failure);
         }
     }
 

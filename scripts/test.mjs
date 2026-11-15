@@ -122,7 +122,7 @@ async function test(signal) {
       assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app"]);
       assert.equal(byName("reactor").displayName, "Demo Reactor");
       assert.equal(byName("core").parent, byName("reactor").path);
-      assert.deepEqual(byName("app").properties, {
+      assert.deepEqual(Object.fromEntries(["groupId","artifactId","version","packaging"].map(key=>[key,byName("app").properties[key]])), {
         groupId: "demo",
         artifactId: "app",
         version: "1.0.0-SNAPSHOT",
