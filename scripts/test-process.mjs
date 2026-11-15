@@ -5,7 +5,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { mavenTimeout, runCommand as execute, withInterrupts } from "./process.mjs";
+import { mavenTimeout, runCommand as execute, windowsCommandLine, withInterrupts } from "./process.mjs";
 import { createReport } from "./report.mjs";
 
 await withInterrupts(async (signal) => {
@@ -115,6 +115,15 @@ await withInterrupts(async (signal) => {
         assert.match(readFileSync(join(reports, "maven-integration.junit.xml"), "utf8"), /<error/);
         assert.deepEqual(readdirSync(temporary), [], "failed integrations remove their scratch reactors");
         assert.ok(existsSync(join(reports, "maven-integration.html")));
+      }
+    });
+    await check("Windows command lines quote paths and refuse what cmd.exe would expand", () => {
+      assert.equal(
+        windowsCommandLine("mvn", ["-B", "-Dmaven.ext.class.path=C:\\Lithe Plugins\\x.jar", "${a}", "", "a&b", "C:\\Lithe Plugins\\"]),
+        'mvn -B "-Dmaven.ext.class.path=C:\\Lithe Plugins\\x.jar" ${a} "" "a&b" "C:\\Lithe Plugins\\\\"',
+      );
+      for (const arg of ['a"b', "%PATH%", "!x!", "a\nb"]) {
+        assert.throws(() => windowsCommandLine("mvn", [arg]), /through cmd\.exe/);
       }
     });
     await check("pre-cancelled calls spawn nothing and invalid deadlines are rejected", async () => {

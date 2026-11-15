@@ -10,6 +10,9 @@
 // `mvn`), so CI can also check the oldest supported Maven; JAVA_HOME selects
 // the Java that runs it, as the JDK build option does in Lithe.
 //
+// LITHE_TEST_PLUGIN_DIR=<dir> tests an unpacked release archive instead of
+// dist/package, as the Windows CI job does on a machine that did not build it.
+//
 // LITHE_CAPTURE_DIR=<dir> also copies the documents there, with the
 // scratch workspace written as `${workspace}`, for Lithe's Core tests.
 //
@@ -23,10 +26,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
-const pluginDir = resolve("dist", "package", PACKAGE_DIR);
+const pluginDir = resolve(process.env.LITHE_TEST_PLUGIN_DIR || join("dist", "package", PACKAGE_DIR));
 const maven = process.env.MVN ?? "mvn";
 if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar"))) {
-  console.error("✗ dist/package is missing; run node scripts/package.mjs first");
+  console.error(`✗ ${pluginDir} is missing; run node scripts/package.mjs first`);
   process.exit(1);
 }
 const manifest = JSON.parse(readFileSync(join(pluginDir, "plugin.json"), "utf8"));
@@ -80,7 +83,8 @@ function capture(name, document) {
   if (!captureDir) return;
   let text = JSON.stringify(document);
   // The real path first: on macOS it extends the temporary path.
-  for (const prefix of new Set([realpathSync(root), root])) text = text.replaceAll(prefix, "${workspace}");
+  // As JSON text, so Windows backslashes match their escaped form.
+  for (const prefix of new Set([realpathSync(root), root])) text = text.replaceAll(JSON.stringify(prefix).slice(1, -1), "${workspace}");
   mkdirSync(captureDir, { recursive: true });
   writeFileSync(join(captureDir, name), text);
 }

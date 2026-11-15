@@ -6,7 +6,9 @@
 // lib/: the Maven core extension in extension/. Lithe never starts it; the
 // model and dependency commands in plugin.json load it into the user's own
 // Maven with -Dmaven.ext.class.path, and it writes the canonical documents
-// Lithe decodes. It carries no native code, so one archive serves both Linux architectures and every Mac.
+// Lithe decodes. It carries no native code, so one archive serves every Mac and both Linux and
+// Windows architectures, copied as -linux.zip and -windows.zip. Packaging needs
+// POSIX zip, so it runs on macOS or Linux; scripts/test.mjs also runs on Windows.
 // The unpacked package stays in dist/package/ for installing a local
 // development copy into Lithe.
 //
@@ -106,9 +108,11 @@ await withInterrupts(async (signal) => {
       cwd: PACKAGE_ROOT, timeoutMs: ZIP_TIMEOUT_MS, signal,
     }));
     console.log(`dist/${ASSET_PREFIX}-${manifest.version}-${PLATFORM}.zip ${sha256(asset)}`);
-    const linuxAsset = resolve("dist", `${ASSET_PREFIX}-${manifest.version}-linux.zip`);
-    cpSync(asset, linuxAsset);
-    console.log(`dist/${ASSET_PREFIX}-${manifest.version}-linux.zip ${sha256(linuxAsset)}`);
+    for (const platform of ["linux", "windows"]) {
+      const copy = resolve("dist", `${ASSET_PREFIX}-${manifest.version}-${platform}.zip`);
+      cpSync(asset, copy);
+      console.log(`dist/${ASSET_PREFIX}-${manifest.version}-${platform}.zip ${sha256(copy)}`);
+    }
   } catch (error) {
     report.failure("packaging lane failed", error);
     console.error(error.stack);

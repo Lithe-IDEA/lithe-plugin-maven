@@ -2,7 +2,7 @@
   "schemaVersion": 0,
   "id": "io.github.lithe-idea.maven-build",
   "displayName": "Maven",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "pluginAPIVersion": 0,
   "requires": {"buildSystems": 0, "projectGenerators": 0, "settings": 0},
   "vendor": {"id": "io.github.lithe-idea", "displayName": "Lithe Community", "signatureRequirement": "none"},

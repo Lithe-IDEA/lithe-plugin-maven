@@ -90,10 +90,12 @@ brew install maven
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载 `maven-build-<版本>-darwin.zip`。
+1. 从 [Releases](https://github.com/Lithe-IDEA/lithe-plugin-maven/releases) 下载对应平台的包：macOS 用
+   `maven-build-<版本>-darwin.zip`，Linux 用 `-linux.zip`，Windows 用 `-windows.zip`（0.2.1 起）。
 2. 在 Lithe 中打开 **设置 → 插件**，点击页面标题栏右侧的 **从文件安装…**，选中这个 zip，核对 SHA-256 和权限后确认。
 
-一个包同时支持 Apple Silicon 和 Intel Mac。
+三个包内容相同：一个包同时支持 Apple Silicon 和 Intel Mac、Linux ARM64 和 x64、Windows ARM64 和 x64。
+Windows 上会使用项目的 `mvnw.cmd`、`MAVEN_HOME\bin\mvn.cmd` 或 `PATH` 上的 `mvn.cmd`。
 
 ## 诊断日志
 
@@ -130,7 +132,8 @@ node scripts/test.mjs
 ```
 
 `MVN=/path/to/mvn` 可为打包和测试指定 Maven 版本，`JAVA_HOME` 指定运行 Maven 的 JDK（CI 用 Maven 3.6.3 加 Java 8
-检查最低版本）。脚本在 macOS/Linux 上运行；每次 Maven 调用默认限时 120 秒，可用 `LITHE_MAVEN_TIMEOUT_MS` 调整
+检查最低版本）。打包脚本在 macOS/Linux 上运行；`scripts/test.mjs` 也能在 Windows 上运行（经 `cmd.exe` 调用 `mvn.cmd`，
+`LITHE_TEST_PLUGIN_DIR` 可指向解压后的发布包，见 [Windows 构建与验证](docs/windows-packaging.md)）。每次 Maven 调用默认限时 120 秒，可用 `LITHE_MAVEN_TIMEOUT_MS` 调整
 （1–600000 毫秒）；`zip` 限时 30 秒。到期或收到 SIGINT/SIGTERM 时，脚本会终止本次启动的进程组，
 500 毫秒后升级为 SIGKILL，再最多等待 2 秒并报告清理失败。每个命令和检查的耗时、结果会写入
 `.artifacts/test-stability/` 的 JSON、JUnit XML 和 HTML；`LITHE_REPORT_DIR` 可以指定其他报告目录。
@@ -213,3 +216,7 @@ LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" node
 ## Linux ARM64 / x64
 
 Linux 构建、资源归属与原生验证入口见 [Linux 构建与验证](docs/linux-packaging.md)。
+
+## Windows ARM64 / x64
+
+Windows 包、Maven 查找顺序与原生验证入口见 [Windows 构建与验证](docs/windows-packaging.md)。
