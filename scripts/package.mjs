@@ -15,9 +15,10 @@
 // Usage: node scripts/package.mjs [--expect-tag <tag>]
 
 import { mavenTimeout, runCommand, withInterrupts, ZIP_TIMEOUT_MS } from "./process.mjs";
+import { verifySdk } from "./sdk/verify-sdk.mjs";
 import { createReport } from "./report.mjs";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
@@ -83,6 +84,13 @@ function assertNoLinks(directory) {
 const report = createReport("package");
 const timeoutMs = mavenTimeout();
 await withInterrupts(async (signal) => {
+  await verifySdk();
+  const build = "settings-backend/target";
+  function sources(path) {return readdirSync(path,{withFileTypes:true}).flatMap(e=>e.isDirectory()?sources(join(path,e.name)):e.name.endsWith(".java")?[join(path,e.name)]:[]);}
+  rmSync(build,{recursive:true,force:true});mkdirSync(join(build,"classes"),{recursive:true});
+  await runCommand("javac",["--release","8","-encoding","UTF-8","-d",join(build,"classes"),...sources("settings-backend/src/main/java"),...sources("vendor/lithe-plugin-sdk-java/src/main/java")],{timeoutMs,signal});
+  writeFileSync(join(build,"MANIFEST.MF"),`Main-Class: io.github.litheidea.maven.settings.MavenSettings\nImplementation-Version: ${manifest.version}\n`);
+  await runCommand("jar",["--create","--file",join(build,"lithe-maven-settings.jar"),"--manifest",join(build,"MANIFEST.MF"),"--date","2026-11-15T00:00:00Z","-C",join(build,"classes"),"."],{timeoutMs,signal});
   try {
     await report.step("build the Maven extension", async () => {
       await runCommand(process.env.MVN ?? "mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { timeoutMs, signal });
@@ -96,6 +104,8 @@ await withInterrupts(async (signal) => {
       cpSync(PACKAGE_DIR, packageRoot, { recursive: true });
       mkdirSync(join(packageRoot, "lib"), { recursive: true });
       cpSync(EXTENSION_JAR, join(packageRoot, "lib", "lithe-maven-extension.jar"));
+      cpSync("settings-backend/target/lithe-maven-settings.jar",join(packageRoot,"lib","lithe-maven-settings.jar"));
+      cpSync("vendor/LICENSE",join(packageRoot,"SDK-LICENSE"));
       cpSync("LICENSE", join(packageRoot, "LICENSE"));
       cpSync("NOTICE", join(packageRoot, "NOTICE"));
       assertNoLinks(packageRoot);

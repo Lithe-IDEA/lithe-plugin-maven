@@ -51,7 +51,7 @@ jobs:
             if [[ "$tag" == "$GITHUB_REF_NAME" ]]; then prerelease=true; fi
           done
           {
-            echo "兼容性：按插件契约 v0（schemaVersion 0、pluginAPIVersion 0）编写，需要新版 Lithe 桌面端（desktop-v* 预发布）。旧版 macOS Lithe 无法安装。"
+            echo "兼容性：按插件契约 v0（schemaVersion 0、pluginAPIVersion 0）编写，需要支持 sourceSettings 0 的 Lithe 桌面端。请先升级宿主；旧版宿主继续使用原有兼容插件版本。"
             echo
             if [[ -s "docs/releases/$GITHUB_REF_NAME.md" ]]; then
               cat "docs/releases/$GITHUB_REF_NAME.md"
@@ -72,4 +72,4 @@ jobs:
           if [[ "$prerelease" == true ]]; then
             release_flags+=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${release_flags[@]}"
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --draft --title "Maven $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${release_flags[@]}"

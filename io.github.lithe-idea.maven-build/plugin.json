@@ -2,11 +2,11 @@
   "schemaVersion": 0,
   "id": "io.github.lithe-idea.maven-build",
   "displayName": "Maven",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "pluginAPIVersion": 0,
-  "requires": {"buildSystems": 0, "projectGenerators": 0, "settings": 0},
+  "requires": {"buildSystems": 0, "projectGenerators": 0, "settings": 0, "backend": 0, "sourceSettings": 0},
   "vendor": {"id": "io.github.lithe-idea", "displayName": "Lithe Community", "signatureRequirement": "none"},
-  "permissions": ["process.build", "project.generate"],
+  "permissions": ["process.build", "project.generate", "backend.launch", "workspace.metadata"],
   "activationEvents": ["onBuildSystem:maven"],
   "settings": [
     {
@@ -28,6 +28,7 @@
       "icon": {"path": "icons/maven.svg"},
       "detection": {"markers": ["pom.xml"], "nesting": "outermost"},
       "invocation": {
+        "runtimeDependencies": [{"id": "java", "minimumVersion": "8", "executables": [{"kind": "toolchain", "toolchainID": "java"}, {"kind": "environment", "variable": "JAVA_HOME", "path": "bin/java", "platforms": ["macos", "linux"]}, {"kind": "environment", "variable": "JAVA_HOME", "path": "bin/java.exe", "platforms": ["windows"]}, {"kind": "command", "command": "java"}], "version": {"arguments": ["-version"], "pattern": "version \"(?:1\\.)?(\\d+(?:\\.\\d+)*)"}}],
         "executables": [
           {"id": "selected", "kind": "setting", "settingID": "mavenExecutable"},
           {
@@ -51,7 +52,7 @@
           {"kind": "environment", "variable": "MAVEN_HOME", "path": "bin/mvn.cmd", "platforms": ["windows"]},
           {"kind": "command", "command": "mvn"}
         ],
-        "environmentInputs": ["MAVEN_HOME"],
+        "environmentInputs": ["MAVEN_HOME", "JAVA_HOME"],
         "globalArguments": [
           "-B",
           "-ntp",
@@ -529,5 +530,8 @@
       ],
       "openFiles": ["pom.xml"]
     }
-  ]
+  ],
+  "requiresTools": ["java"],
+  "backend": {"launch": {"kind": "runtime", "tool": "java", "minimumVersion": "8", "entry": "lib/lithe-maven-settings.jar", "runtimeArguments": ["-Xms16m", "-Xmx96m"]}},
+  "settingActions": [{"id": "compiler", "title": "Read compiler settings", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "compiler.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"compilerID": "maven"}}, {"id": "libraries", "title": "Read local JAR dependencies", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "libraries.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"buildSystemID": "maven"}}]
 }
