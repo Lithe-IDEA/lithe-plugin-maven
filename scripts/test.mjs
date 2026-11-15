@@ -75,7 +75,11 @@ function run(name, root, list, signal, values = {}) {
   }));
 }
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
+// The native real path expands Windows 8.3 short names (the runners' TEMP is
+// C:\Users\RUNNER~1\...): Maven canonicalizes module directories on Windows
+// but resolves `-pl core` against the working directory as given, so under a
+// short name it finds no selected project. Lithe passes the long path it opened.
+const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
 const root = join(scratch, "reactor");
 const outputs = join(scratch, "outputs");
 const captureDir = process.env.LITHE_CAPTURE_DIR;
