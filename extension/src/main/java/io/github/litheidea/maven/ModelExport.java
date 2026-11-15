@@ -1,6 +1,7 @@
 package io.github.litheidea.maven;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -64,7 +65,7 @@ final class ModelExport {
             if (name != null && !name.trim().isEmpty() && !name.equals(project.getArtifactId())) {
                 entry.put("displayName", name.trim());
             }
-            File aggregator = aggregators.get(path);
+            File aggregator = aggregators.get(key(project.getBasedir()));
             if (aggregator != null) {
                 entry.put("parent", path(aggregator));
             }
@@ -111,7 +112,7 @@ final class ModelExport {
                 if (directory.isFile()) {
                     directory = directory.getParentFile();
                 }
-                result.put(path(directory), project.getBasedir());
+                result.put(key(directory), project.getBasedir());
             }
         }
         return result;
@@ -312,6 +313,19 @@ final class ModelExport {
 
     static String path(File file) {
         return file.toPath().toAbsolutePath().normalize().toString();
+    }
+
+    /**
+     * Identifies a directory for comparison. On Windows Maven canonicalizes
+     * module directories but not the directory it runs in, so the same folder
+     * can differ in drive-letter case, component case, or 8.3 short names.
+     */
+    static String key(File file) {
+        try {
+            return file.getCanonicalPath();
+        } catch (IOException error) {
+            return path(file);
+        }
     }
 
     private static final class Goals {

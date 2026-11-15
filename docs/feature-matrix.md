@@ -16,19 +16,21 @@
 只有按“验证方法”完整走过一遍，并写明日期、插件版本和宿主版本，才能标 `verified`。
 自动化测试的结果写在“最近验证”里，不能代替验收。
 
-Windows 现新增 `maven-build-<版本>-windows.zip`，与 macOS/Linux 使用相同的便携 Java 资源；下表旧工作流的完整原生验收状态保持不变。
+从 0.2.1 起插件也发布 `maven-build-<版本>-windows.zip`（与 macOS 包逐字节相同，见 [Windows 构建与验证](windows-packaging.md)）。
+Windows 一列的实现状态与 macOS 相同；Windows 上还没有做过宿主端到端测试或手工验收，所以验证都是 `pending`。
+CI 在 Windows x64 上用 `mvn.cmd` 运行声明的模型、依赖和测试命令，结果见 [Windows 安装包](#windows-安装包)。
 
 ## 总览
 
 | ID | 能力 | macOS | Windows | 最近验证 |
 | --- | --- | --- | --- | --- |
-| `java-maven-project` | 识别 Maven 项目：构建根、模块树、内容根和任务 | implemented / pending | missing / not-applicable | 2026-11-14 宿主端到端测试通过 |
-| `java-maven-profiles-dependencies` | Profiles 构建选项与依赖树 | implemented / pending | missing / not-applicable | 2026-11-14 依赖树由宿主端到端测试覆盖 |
-| `java-maven-project-settings` | Maven 调用设置：Maven 程序和工作区构建选项 | partial / pending | missing / not-applicable | 2026-11-14 Maven executable 由宿主端到端测试覆盖 |
+| `java-maven-project` | 识别 Maven 项目：构建根、模块树、内容根和任务 | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
+| `java-maven-profiles-dependencies` | Profiles 构建选项与依赖树 | implemented / pending | implemented / pending | 2026-11-14 依赖树由宿主端到端测试覆盖（macOS） |
+| `java-maven-project-settings` | Maven 调用设置：Maven 程序和工作区构建选项 | partial / pending | partial / pending | 2026-11-14 Maven executable 由宿主端到端测试覆盖（macOS） |
 | `java-maven-settings-reach-jdt` | Maven 构建选项作用于 Java 语言服务 | missing / not-applicable | missing / not-applicable | — |
-| `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | missing / not-applicable | 没有自动化覆盖 |
+| `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | implemented / pending | 没有自动化覆盖 |
 | `maven-user-settings-editing` | 编辑用户级 `~/.m2/settings.xml` 的本地仓库 | missing / not-applicable | missing / not-applicable | — |
-| `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | missing / not-applicable | 2026-11-14 宿主端到端测试通过 |
+| `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
 
 前六条从主仓库迁移，最后一条是本仓库新增，用来记录随测试一起迁来的新建项目测试。
 
@@ -86,7 +88,7 @@ Local Repository、Offline、Skip Tests，按工作区保存，加到构建、�
 | 平台 | 实现 | 验证 | 说明 |
 | --- | --- | --- | --- |
 | macOS | partial | pending | 构建选项按工作区保存，不能给单个子项目设置不同的 JDK 或选项 |
-| Windows | missing | not-applicable | 没有 Windows 包 |
+| Windows | partial | pending | 同 macOS；Windows 上按 `mvnw.cmd`、`MAVEN_HOME\bin\mvn.cmd`、`PATH` 上的 `mvn`（`mvn.cmd`）的顺序查找 Maven |
 
 **证据**：`plugin.json` 的 `settings`（`mavenExecutable`）、`buildSystems[0].invocation` 和 `buildSystems[0].options`；
 宿主端到端测试设置 Maven executable 后检查模型重新读取和 `compile` 都运行了设置的 `mvn`。
@@ -111,7 +113,7 @@ Local Repository、Offline、Skip Tests，按工作区保存，加到构建、�
 | 平台 | 实现 | 验证 | 说明 |
 | --- | --- | --- | --- |
 | macOS | missing | not-applicable | 0.0.1 没有后端，不导出 `languageImport.settings` |
-| Windows | missing | not-applicable | 没有 Windows 包 |
+| Windows | missing | not-applicable | 同 macOS：没有后端，不导出 `languageImport.settings` |
 
 **说明**：Java Support 1.2.0 通过插件函数 `languageImport.settings` 向构建插件收集 JDT LS 设置，构建插件改设置后调用
 `languageImport.settingsChanged`。插件函数需要后端进程来应答，而 0.0.1 是纯声明式插件，所以 Maven 的构建选项目前不会传给
@@ -144,7 +146,7 @@ JDT LS，JDT LS 按自己的默认方式导入 Maven 项目。
 | 平台 | 实现 | 验证 | 说明 |
 | --- | --- | --- | --- |
 | macOS | missing | not-applicable | 0.0.1 没有这个设置；Local Repository 构建选项只传 `-Dmaven.repo.local`，不改 `settings.xml` |
-| Windows | missing | not-applicable | 没有 Windows 包 |
+| Windows | missing | not-applicable | 同 macOS |
 
 **说明**：旧版 Maven 后端实现过这个功能，契约 v0 重写时没有保留。按 Lithe 的“设置必须反映工具的真实配置”规则，
 重新实现时要读取并回显 `settings.xml` 的实际值，确认后才写回，并做外部修改冲突保护。
@@ -183,3 +185,13 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 | 原生 JAR 引用与编译运行 | implemented / pending | implemented / pending | `scripts/compiler/` 编译外部 JAR 并运行引用它的程序；配置与包的只读边界见 native-settings.md |
 
 2026-11-15：本地 macOS 自动化已通过，不将脚本通过等同于所有交互场景验收。Windows 的实机结果另随 PR 补充。
+
+## Windows 安装包
+
+| 能力 | Windows ARM64 | Windows x64 | 验证入口 |
+| --- | --- | --- | --- |
+| 构建与安装包 | 已实现（同一份包）；没有原生 CI | 已实现；[已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43728100763) | `.github/workflows/ci.yml` 的 `windows` 任务、[资源说明](windows-packaging.md) |
+| 真实 Maven 流程（`mvn.cmd`） | 没有原生 CI | [已通过原生 CI](https://github.com/Lithe-IDEA/lithe-plugin-maven/actions/runs/43728100763)（runner 自带 Maven 和 3.6.3 + Java 8） | `scripts/test.mjs`（`LITHE_TEST_PLUGIN_DIR` 指向解压后的 Windows 包） |
+
+包里只有声明资源和纯 Java 的扩展 JAR，ARM64 与 x64 的差别只在用户自己的 JDK 和 Maven，所以 ARM64 用同一份包，
+但在原生 ARM64 CI 或手工验收通过前不宣称通过。

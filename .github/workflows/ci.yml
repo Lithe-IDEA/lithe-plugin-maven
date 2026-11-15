@@ -63,8 +63,15 @@ jobs:
           name: native-compiler-projection
           path: .artifacts/compiler/visual-*.json
           if-no-files-found: error
-      - name: Verify Linux release archives
+      - name: Verify Linux and Windows release archives
         run: node --test --test-timeout=60000 scripts/package/*.test.mjs
+      - name: Hand the Windows archive to the Windows job
+        if: matrix.maven == 'runner' && runner.arch == 'X64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-build-windows
+          path: dist/maven-build-*-windows.zip
+          if-no-files-found: error
       - name: Validate against Lithe Store rules
         if: matrix.maven == 'runner'
         run: |
@@ -128,3 +135,70 @@ jobs:
           path: .artifacts/compiler/visual/
           if-no-files-found: error
           retention-days: 14
+
+  # The Windows archive built above, unpacked the way Lithe installs it (under
+  # a path with a space), runs the declared commands through mvn.cmd.
+  windows:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        maven: [runner, 3.6.3]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            8
+            17
+      - uses: actions/download-artifact@v4
+        with:
+          name: maven-build-windows
+          path: ${{ runner.temp }}/archive
+      - name: Unpack the Windows archive
+        run: |
+          $archive = Get-ChildItem "$env:RUNNER_TEMP\archive\maven-build-*-windows.zip" | Select-Object -First 1
+          $plugins = Join-Path $env:RUNNER_TEMP "Lithe Plugins"
+          Expand-Archive -Path $archive.FullName -DestinationPath $plugins
+          "LITHE_TEST_PLUGIN_DIR=$plugins\io.github.lithe-idea.maven-build" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Download Maven ${{ matrix.maven }}
+        if: matrix.maven != 'runner'
+        env:
+          VERSION: ${{ matrix.maven }}
+        run: |
+          $base = "https://archive.apache.org/dist/maven/maven-3/$env:VERSION/binaries/apache-maven-$env:VERSION-bin.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "maven.zip"
+          Invoke-WebRequest $base -OutFile $zip
+          Invoke-WebRequest "$base.sha512" -OutFile "$zip.sha512"
+          $expected = ((Get-Content -Raw "$zip.sha512").Trim() -split '\s+')[0]
+          $actual = (Get-FileHash $zip -Algorithm SHA512).Hash
+          if ($actual -ne $expected) { throw "SHA-512 mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          "MVN=$env:RUNNER_TEMP\apache-maven-$env:VERSION\bin\mvn.cmd" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Run the declared commands with Maven on Windows
+        env:
+          JAVA_HOME: ${{ matrix.maven == 'runner' && env.JAVA_HOME || env[format('JAVA_HOME_8_{0}', runner.arch)] }}
+        run: |
+          if ($env:MVN) { & $env:MVN --version } else { mvn --version }
+          node scripts/test.mjs
+      - name: Verify native compiler settings and JARs in the installed Windows archive
+        if: matrix.maven == 'runner'
+        run: |
+          node --test --test-timeout=15000 scripts/compiler/process.test.mjs
+          node scripts/compiler/test.mjs
+      - name: Upload script timing reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-timings-maven-${{ matrix.maven }}-windows-${{ runner.arch }}
+          path: .artifacts/test-stability/
+          if-no-files-found: warn

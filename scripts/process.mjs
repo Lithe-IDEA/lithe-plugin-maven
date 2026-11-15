@@ -1,6 +1,11 @@
 // Own each command's POSIX process group, including Maven's forked JVMs.
 // Async spawn keeps the watchdog and interrupt handlers runnable even when
 // the command ignores SIGTERM; execFileSync's timeout cannot guarantee that.
+//
+// Windows has no process groups and Node cannot start mvn.cmd without a
+// shell, so there the command runs under cmd.exe, which resolves `mvn`
+// through PATHEXT as Lithe does, and stopping it kills the whole process tree
+// with taskkill while the command is still running.
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 
@@ -8,6 +13,20 @@ export const MAVEN_TIMEOUT_MS = 120_000;
 export const ZIP_TIMEOUT_MS = 30_000;
 const GRACE_MS = 500;
 const KILL_WAIT_MS = 2_000;
+const WINDOWS = process.platform === "win32";
+
+/**
+ * The cmd.exe command line for one command. Arguments that cmd.exe or a batch
+ * file would expand or split are rejected rather than escaped.
+ */
+export function windowsCommandLine(command, args) {
+  return [command, ...args].map((arg) => {
+    if (/["%!\r\n\0]/.test(arg)) throw new Error(`cannot pass ${JSON.stringify(arg)} through cmd.exe`);
+    if (/^[A-Za-z0-9_\-+=.,:/\\@${}]+$/.test(arg)) return arg;
+    // Backslashes before the closing quote would escape it for the program.
+    return `"${arg.replace(/(\\+)$/, "$1$1")}"`;
+  }).join(" ");
+}
 
 export function mavenTimeout() {
   const value = process.env.LITHE_MAVEN_TIMEOUT_MS;
@@ -28,13 +47,17 @@ export function runCommand(command, args, {
       throw new Error(`${name} must be an integer from 1 to 3600000`);
     }
   }
-  if (process.platform === "win32") throw new Error("These packaging/test scripts require POSIX process groups (macOS or Linux)");
   signal?.throwIfAborted();
   const started = performance.now();
   const invocation = [command, ...args].map((arg) => JSON.stringify(arg)).join(" ");
+  const line = WINDOWS ? windowsCommandLine(command, args) : undefined;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio, detached: true, shell: false });
+    const child = WINDOWS
+      ? spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/v:off", "/s", "/c", `"${line}"`], {
+        cwd, env, stdio, windowsHide: true, windowsVerbatimArguments: true,
+      })
+      : spawn(command, args, { cwd, env, stdio, detached: true, shell: false });
     let closed = false;
     let code;
     let exitSignal;
@@ -48,13 +71,22 @@ export function runCommand(command, args, {
     const diagnostic = (message) => new Error(
       `${message} after ${Math.round(performance.now() - started)} ms\ncommand: ${invocation}\ncwd: ${cwd}`,
     );
+    let killing;
     const groupExists = () => {
-      if (!child.pid) return false;
+      // Windows cannot find a tree once its root has exited; send() kills it before.
+      if (WINDOWS || !child.pid) return false;
       try { process.kill(-child.pid, 0); return true; }
       catch (error) { if (error.code === "ESRCH") return false; throw error; }
     };
     const send = (value) => {
       if (!child.pid) return;
+      if (WINDOWS) {
+        if (child.exitCode !== null || child.signalCode !== null || killing) return;
+        killing = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        killing.once("error", (error) => { failure ??= diagnostic(`cannot run taskkill: ${error.message}`); });
+        killing.once("exit", () => { killing = undefined; });
+        return;
+      }
       try { process.kill(-child.pid, value); }
       catch (error) { if (error.code !== "ESRCH") failure ??= diagnostic(`cannot send ${value}: ${error.message}`); }
     };

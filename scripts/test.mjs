@@ -10,6 +10,9 @@
 // `mvn`), so CI can also check the oldest supported Maven; JAVA_HOME selects
 // the Java that runs it, as the JDK build option does in Lithe.
 //
+// LITHE_TEST_PLUGIN_DIR=<dir> tests an unpacked release archive instead of
+// dist/package, as the Windows CI job does on a machine that did not build it.
+//
 // LITHE_CAPTURE_DIR=<dir> also copies the documents there, with the
 // scratch workspace written as `${workspace}`, for Lithe's Core tests.
 //
@@ -23,10 +26,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
-const pluginDir = resolve("dist", "package", PACKAGE_DIR);
+const pluginDir = resolve(process.env.LITHE_TEST_PLUGIN_DIR || join("dist", "package", PACKAGE_DIR));
 const maven = process.env.MVN ?? "mvn";
 if (!existsSync(join(pluginDir, "lib", "lithe-maven-extension.jar"))) {
-  console.error("✗ dist/package is missing; run node scripts/package.mjs first");
+  console.error(`✗ ${pluginDir} is missing; run node scripts/package.mjs first`);
   process.exit(1);
 }
 const manifest = JSON.parse(readFileSync(join(pluginDir, "plugin.json"), "utf8"));
@@ -72,7 +75,11 @@ function run(name, root, list, signal, values = {}) {
   }));
 }
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
+// The native real path expands Windows 8.3 short names (the runners' TEMP is
+// C:\Users\RUNNER~1\...): Maven canonicalizes module directories on Windows
+// but resolves `-pl core` against the working directory as given, so under a
+// short name it finds no selected project. Lithe passes the long path it opened.
+const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
 const root = join(scratch, "reactor");
 const outputs = join(scratch, "outputs");
 const captureDir = process.env.LITHE_CAPTURE_DIR;
@@ -80,7 +87,8 @@ function capture(name, document) {
   if (!captureDir) return;
   let text = JSON.stringify(document);
   // The real path first: on macOS it extends the temporary path.
-  for (const prefix of new Set([realpathSync(root), root])) text = text.replaceAll(prefix, "${workspace}");
+  // As JSON text, so Windows backslashes match their escaped form.
+  for (const prefix of new Set([realpathSync(root), root])) text = text.replaceAll(JSON.stringify(prefix).slice(1, -1), "${workspace}");
   mkdirSync(captureDir, { recursive: true });
   writeFileSync(join(captureDir, name), text);
 }
