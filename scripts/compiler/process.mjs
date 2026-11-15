@@ -1,11 +1,11 @@
 // Integration-test tools run in owned process trees with bounded output and cleanup.
 import {spawn,execFile} from 'node:child_process';
+import {windowsCommandLine} from '../process.mjs';
 const LIMIT=2*1024*1024;
 export function runTool(tool,args,{cwd,env=process.env,timeout=120000}={}) {
  let command=tool,parameters=args,verbatim=false;
- if(process.platform==='win32'&&/\.(cmd|bat)$/i.test(tool)) {
-  const quote=value=>{if(/["%\r\n]/.test(value))throw Error('Unsupported batch test argument');return `"${value}"`;};
-  command=process.env.ComSpec??'cmd.exe';parameters=['/d','/v:off','/s','/c',`"${[tool,...args].map(quote).join(' ')}"`];verbatim=true;
+ if(process.platform==='win32'&&(/\.(cmd|bat)$/i.test(tool)||!/[.][^\\/]+$/.test(tool))) {
+  command=process.env.ComSpec??'cmd.exe';parameters=['/d','/v:off','/s','/c',`"${windowsCommandLine(tool,args)}"`];verbatim=true;
  }
  return new Promise((resolve,reject)=>{
   const child=spawn(command,parameters,{cwd,env,detached:process.platform!=='win32',windowsHide:true,windowsVerbatimArguments:verbatim,stdio:['ignore','pipe','pipe']});

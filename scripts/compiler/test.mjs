@@ -11,7 +11,7 @@ import {createHash} from 'node:crypto';
 import {BackendClient,bounded} from './backend-client.mjs';
 const scratch=realpathSync.native(mkdtempSync(join(tmpdir(),'lithe-maven-compiler-')));
 const pkg=resolve(process.env.LITHE_TEST_PLUGIN_DIR??'dist/package/io.github.lithe-idea.maven-build');
-const maven=process.env.MVN??(process.platform==='win32'?'mvn.cmd':'mvn');
+const maven=process.env.MVN??'mvn';
 const root=join(scratch,'workspace');mkdirSync(root);
 const command=(tool,args,cwd=root)=>runTool(tool,args,{cwd,timeout:120000});
 const pom=(body)=>`<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>${body}</project>`;
