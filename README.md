@@ -66,6 +66,8 @@ JDK 是构建选项而不是插件设置，因为契约 v0 的插件设置不能
 3. 环境变量 `MAVEN_HOME` 下的 `bin/mvn`；
 4. `PATH` 里的 `mvn`。
 
+运行前的编译由构建提供者执行：它用 Lithe 按上面的顺序解析出的程序；只拿到命令名（例如 `mvn`）时，按 `PATH` 查找，Windows 上再按 `PATHEXT` 补扩展名（`mvn.cmd`），找不到时报 `maven.run.noMaven`。
+
 要求 Maven 3.6.3 或更新版本、Java 8 或更新版本。没有 Maven 的话可以先安装：
 
 ```bash

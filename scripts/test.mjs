@@ -179,6 +179,11 @@ async function prepareRuns(signal) {
         rmSync(join(root, "service", "src", "main", "java", "demo", "service", "Broken.java"));
       }
     });
+    await check("a Maven command that is not on PATH ends preparation with a clear error", async () => {
+      await assert.rejects(request({ name: "Main", path: "app", tags: ["java-application"], properties: {} }, {
+        tool: { executable: "lithe-no-such-maven" },
+      }), (error) => error.response?.data?.pluginErrorCode === "maven.run.noMaven" || /not on PATH/.test(error.message));
+    });
     await report.step("stop the build provider", () => client.close());
   } catch (error) {
     client.kill();

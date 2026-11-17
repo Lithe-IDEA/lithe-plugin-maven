@@ -31,7 +31,7 @@ CI 在 Windows x64 上用 `mvn.cmd` 运行声明的模型、依赖和测试命�
 | `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | implemented / pending | 没有自动化覆盖 |
 | `maven-user-settings-editing` | 编辑用户级 `~/.m2/settings.xml` 的本地仓库 | missing / not-applicable | missing / not-applicable | — |
 | `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
-| `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行（调试待宿主支持） | implemented / pending | implemented / pending | 2026-11-17 宿主端到端测试和 `scripts/test.mjs` 通过（macOS） |
+| `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行（调试待宿主支持） | implemented / pending | implemented / pending | 2026-11-17 宿主端到端测试和 `scripts/test.mjs` 通过（macOS）；`scripts/test.mjs` 在 Windows CI 通过 |
 
 前六条从主仓库迁移；`maven-project-generators` 是本仓库新增，用来记录随测试一起迁来的新建项目测试；`maven-run-applications` 随运行配置一起新增（[1lck/Lithe-IDEA#2074](https://github.com/1lck/Lithe-IDEA/issues/2074)）。
 

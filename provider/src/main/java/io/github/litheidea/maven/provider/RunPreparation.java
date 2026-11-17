@@ -62,8 +62,9 @@ final class RunPreparation {
         Request request = Request.of(params);
         Path instance = workspace.resolve(request.root).normalize();
         String project = relative(request.root, request.projectPath);
+        Map<String, String> environment = environment(request.environment);
         List<String> command = new ArrayList<>();
-        command.add(maven(request.tool, instance));
+        command.add(executable(maven(request.tool, instance), environment, File.separatorChar == '\\'));
         command.add("-B");
         command.add("-ntp");
         command.addAll(request.optionArguments);
@@ -81,7 +82,7 @@ final class RunPreparation {
             context.progress(messages.compiling(request.targetName), null, null);
             Processes.Result result = context.run(command, new Processes.Options()
                     .directory(instance)
-                    .environment(environment(request.environment))
+                    .environment(environment)
                     .cancellation(context.cancellation())
                     .maxOutputBytes(64 * 1024)
                     .onStdout(text -> stream(context, text))
@@ -235,6 +236,68 @@ final class RunPreparation {
             }
         }
         return windows ? "mvn.cmd" : "mvn";
+    }
+
+    /**
+     * The path to start for {@code command}. A command without a directory is
+     * looked up on the {@code PATH} of {@code environment}, as a shell would:
+     * Java starts a bare name through the operating system, and on Windows
+     * that finds only {@code .exe} files, so {@code mvn}, which is
+     * {@code mvn.cmd} there, would fail to start. On Windows a name without
+     * an extension also tries each {@code PATHEXT} extension. A command that
+     * names a directory is returned as it is.
+     *
+     * @throws PluginError {@code maven.run.noMaven} when no {@code PATH}
+     *     entry holds the command
+     */
+    String executable(String command, Map<String, String> environment, boolean windows) {
+        if (command.indexOf('/') >= 0 || (windows && (command.indexOf('\\') >= 0 || command.indexOf(':') >= 0))) {
+            return command;
+        }
+        List<String> names = new ArrayList<>();
+        String extensions = variable(environment, "PATHEXT", windows);
+        if (windows && command.indexOf('.') < 0) {
+            for (String extension : (extensions == null || extensions.isEmpty() ? ".COM;.EXE;.BAT;.CMD" : extensions).split(";")) {
+                if (!extension.isEmpty()) {
+                    names.add(command + extension.toLowerCase(Locale.ROOT));
+                }
+            }
+        } else {
+            names.add(command);
+        }
+        String path = variable(environment, "PATH", windows);
+        if (path != null) {
+            for (String directory : path.split(File.pathSeparator)) {
+                if (directory.isEmpty()) {
+                    continue;
+                }
+                for (String name : names) {
+                    Path candidate;
+                    try {
+                        candidate = Paths.get(directory.replace("\"", ""), name);
+                    } catch (java.nio.file.InvalidPathException ignored) {
+                        break;
+                    }
+                    if (Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate))) {
+                        return candidate.toString();
+                    }
+                }
+            }
+        }
+        throw new PluginError("maven.run.noMaven", messages.noMaven(command));
+    }
+
+    /** The variable {@code name}, whose case Windows ignores. */
+    private static String variable(Map<String, String> environment, String name, boolean windows) {
+        if (!windows) {
+            return environment.get(name);
+        }
+        for (Map.Entry<String, String> entry : environment.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     private static Map<String, String> environment(Map<String, String> overrides) {

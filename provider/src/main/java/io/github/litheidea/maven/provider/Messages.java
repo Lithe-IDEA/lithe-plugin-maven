@@ -24,7 +24,13 @@ final class Messages {
                 : "The Maven build failed (exit code " + exitCode + "). See the Maven output in the Run window.";
     }
 
-    String noRunDocument() {
+    String noMaven(String command) {
+        return chinese
+                ? "在 PATH 中找不到 Maven（" + command + "）。请安装 Maven，或在 Maven 设置里填写 Maven executable 的完整路径。"
+                : "Maven (" + command + ") is not on PATH. Install Maven, or enter the full path of the Maven executable in the Maven settings.";
+    }
+
+        String noRunDocument() {
         return chinese
                 ? "Maven 没有写出运行信息，Lithe 的 Maven 扩展可能没有加载。"
                 : "Maven wrote no run information; Lithe's Maven extension may not have loaded.";
