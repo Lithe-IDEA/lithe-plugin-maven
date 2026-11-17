@@ -31,8 +31,9 @@ CI 在 Windows x64 上用 `mvn.cmd` 运行声明的模型、依赖和测试命�
 | `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | implemented / pending | 没有自动化覆盖 |
 | `maven-user-settings-editing` | 编辑用户级 `~/.m2/settings.xml` 的本地仓库 | missing / not-applicable | missing / not-applicable | — |
 | `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
+| `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行与调试 | implemented / pending | implemented / pending | 2026-11-17 `scripts/test.mjs` 通过（macOS） |
 
-前六条从主仓库迁移，最后一条是本仓库新增，用来记录随测试一起迁来的新建项目测试。
+前六条从主仓库迁移；`maven-project-generators` 是本仓库新增，用来记录随测试一起迁来的新建项目测试；`maven-run-applications` 随运行配置一起新增（[1lck/Lithe-IDEA#2074](https://github.com/1lck/Lithe-IDEA/issues/2074)）。
 
 ## java-maven-project
 
@@ -195,3 +196,31 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 
 包里只有声明资源和纯 Java 的扩展 JAR，ARM64 与 x64 的差别只在用户自己的 JDK 和 Maven，所以 ARM64 用同一份包，
 但在原生 ARM64 CI 或手工验收通过前不宣称通过。
+
+## maven-run-applications
+
+**能力**：读取项目时把 Spring Boot 应用（`@SpringBootApplication` 类或 `spring-boot-maven-plugin`）和写明主类的
+Java 应用（`exec-maven-plugin`、jar 清单）列为 target，`run` 声明把它们变成运行配置；构建提供者
+`lib/lithe-maven-provider.jar` 准备运行：编译模块及其反应堆依赖，导出运行时类路径和主类，返回 `java -cp … 主类`。
+Spring Boot 服务可以调试：按宿主分配的端口加 `-agentlib:jdwp`，挂起到调试器连上。
+
+**证据**：`plugin.json` 的 `buildSystems[0].provider` 和 `buildSystems[0].run`、`extension/.../Applications.java`、
+`extension/.../RunExport.java`、`provider/`、`scripts/test.mjs` 的运行准备检查、`test/fixtures/reactor/service/`。
+
+**依赖的宿主能力**：`buildProviders`（独立提供者进程和 `lithe/build/prepareRun`）、运行配置解析（`fromTargets`）、
+注册表连接调试（`debug.configurationType: java`，需要启用一个提供 `java` 类型 `attach` 的调试适配器）。
+
+**最近验证**：2026-11-17，macOS arm64，`node scripts/test.mjs`：启动打包后的提供者，对 `service`（Spring Boot）和
+`app`（jar 清单主类）准备运行并用返回的命令真正启动，检查输出里的 JVM 参数、程序参数和环境变量；检查兄弟模块
+来自反应堆、测试依赖不在类路径上、未写主类时用编译出的唯一主类、调试参数和编译失败的错误。没有宿主端到端测试，
+也没有在 Lithe 里手工运行和调试。
+
+**验证方法**（macOS）：
+
+1. 安装插件包，打开含 Spring Boot 模块和 `exec-maven-plugin` 模块的多模块项目，信任工作区。
+2. 标题栏运行配置菜单列出每个应用；选中 Spring Boot 应用点运行，运行窗口先显示 Maven 编译输出，再显示应用输出；
+   停止后应用进程退出。
+3. 在运行配置编辑器里改 JVM 参数、程序参数、环境变量和入口，再次运行时生效。
+4. 启用 Java 调试适配器后调试 Spring Boot 应用，断点命中。
+5. 制造编译错误后运行，看到“Maven 编译失败”的提示，没有启动残缺的应用。
+6. 整个过程中插件安装目录不被写入。

@@ -10,6 +10,7 @@
   <modules>
     <module>core</module>
     <module>app</module>
+    <module>service</module>
   </modules>
 
   <properties>
@@ -29,6 +30,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>3.13.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.2</version>
         </plugin>
       </plugins>
     </pluginManagement>

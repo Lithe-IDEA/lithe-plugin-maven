@@ -25,6 +25,7 @@
 | 彩色输出 | 每条 Maven 命令都带 `-Dstyle.color=always`，即使输出不是终端也保留 Maven 的颜色；Lithe 的构建、运行和测试控制台按颜色显示 `[INFO]`、`[WARNING]`、`[ERROR]` 和 `BUILD SUCCESS`，匹配诊断前会先去掉颜色转义 |
 | 依赖 | 显示整个反应堆或单个模块的依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
+| 运行配置 | Spring Boot 应用和写明主类的 Java 应用自动出现在标题栏的运行配置里，可以运行、调试（Spring Boot）和编辑参数，见下面的「运行应用」 |
 
 ## 设置和构建选项
 
@@ -83,10 +84,37 @@ brew install maven
   选中模块时用 `-Dlithe.dependenciesProject` 只导出这个模块，否则导出反应堆里的每个模块。
 - 输出文件由 Lithe 在这个工作区的插件状态目录（插件包之外的可写目录）里分配，Maven 退出后读取并删除。
 - 读取项目和依赖不会编译或打包，也不会生成 `target/`；解析依赖时只读 POM，不下载依赖 jar。
+- 准备运行时，扩展在构建结束后把类路径和主类写到 `-Dlithe.runOutput` 指定的临时文件（见「运行应用」），
+  构建失败时不写。
 - 没有 Lithe 的属性时扩展什么都不做；插件目录在运行时保持只读。
 
 读取项目会执行 POM 中声明的 Maven 扩展和插件，首次读取还可能联网下载插件描述，所以这两条命令都声明了
 `executesProjectCode` 和 `mayUseNetwork`，Lithe 会先确认你信任这个工作区。
+
+## 运行应用
+
+读取项目时，扩展把能运行的应用列为构建模型里的 target，`plugin.json` 的 `run` 把它们变成运行配置：
+
+| 运行配置 | 来源 | 执行方式 |
+| --- | --- | --- |
+| `spring-boot` | 源码根里带 `@SpringBootApplication` 的类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务，可调试 |
+| `application` | `exec-maven-plugin` 的 `mainClass` 或 jar 清单 `archive/manifest/mainClass` 写明主类的模块 | 应用 |
+
+列 target 只读源码开头和 POM，不编译。运行时 Lithe 启动随包的构建提供者 `lib/lithe-maven-provider.jar`
+（源码在 `provider/`），由它准备运行：
+
+1. 用你的 Maven（Lithe 解析出的那个，否则按 `mvnw`、`MAVEN_HOME`、`PATH` 查找）和当前构建选项运行
+   `-pl <模块> -am process-classes`，编译这个模块和它依赖的反应堆模块，输出显示在运行窗口。
+2. 扩展在构建结束后写出运行时类路径（模块输出目录加 compile/runtime/system 依赖，兄弟模块用反应堆里的
+   `target/classes`，不需要 `install`）和编译出的主类。
+3. 返回 `java -cp <类路径> <主类>`，由 Lithe 用项目的 JDK 启动并管理这个进程。主类依次取运行配置的入口、
+   target 的 `mainClass`、编译结果里唯一的主类（Spring Boot 优先带注解的类）；有多个时报错并列出候选。
+   类路径超过 24 000 个字符时写进 `target/lithe-run/` 下只含清单的 jar，避开 Windows 命令行长度限制。
+4. 调试 Spring Boot 服务时加 `-agentlib:jdwp=…,suspend=y`，服务停在启动处，等 Lithe 选中的 Java 调试器连到
+   Lithe 分配的端口。
+
+不经过 `spring-boot:run`，Lithe 停止的就是应用进程本身。运行配置里的 JVM 参数、程序参数、环境变量和工作目录
+原样带到启动命令。
 
 ## 安装
 

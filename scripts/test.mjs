@@ -21,9 +21,11 @@
 import assert from "node:assert/strict";
 import { mavenTimeout, runCommand, withInterrupts } from "./process.mjs";
 import { createReport } from "./report.mjs";
+import { BackendClient } from "./compiler/backend-client.mjs";
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
 const pluginDir = resolve(process.env.LITHE_TEST_PLUGIN_DIR || join("dist", "package", PACKAGE_DIR));
@@ -115,6 +117,75 @@ async function document(name, declaration, signal, values = {}) {
   return JSON.parse(readFileSync(outputFile, "utf8"));
 }
 
+/**
+ * Starts the packaged build provider the way Lithe does and asks it to prepare runs, then
+ * launches the plans it returns with the java on PATH, as Lithe launches them with the
+ * project's JDK.
+ */
+async function prepareRuns(signal) {
+  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], timeoutMs: timeoutMs });
+  try {
+    await report.step("start the build provider", () => client.initialize(root));
+    let operation = 0;
+    const request = (target, extra = {}) => client.request("lithe/build/prepareRun", {
+      operationID: `run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      tool: { executable: maven }, run: target.tags.includes("spring-boot") ? "spring-boot" : "application",
+      project: { name: target.path, path: target.path }, target, userArguments: ["typed"], ...extra,
+    });
+    const prepare = (target, extra) => report.step(`prepare ${target.name}`, () => request(target, extra));
+    const launch = (plan) => {
+      assert.deepEqual(plan.executable, { kind: "toolchain", value: "java" });
+      return execFileSync("java", plan.arguments, {
+        cwd: join(root, plan.workingDirectory), env: { ...process.env, ...plan.environment }, encoding: "utf8", timeout: timeoutMs,
+      });
+    };
+
+    const service = await prepare({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: { mainClass: "demo.service.ServiceApplication" } }, {
+      launchOptions: { execution: "service", runtimeArguments: ["-Dgreeting=hi there"], arguments: ["--port=0"], environment: { LITHE_FIXTURE: "set" } },
+    });
+    await check("a service run compiles its reactor dependencies and launches its main class", () => {
+      assert.equal(service.workingDirectory, "service");
+      assert.deepEqual(service.environment, { LITHE_FIXTURE: "set" });
+      const classpath = service.arguments[service.arguments.indexOf("-cp") + 1].split(delimiter);
+      assert.equal(classpath[0], join(root, "service", "target", "classes"));
+      assert.ok(classpath.includes(join(root, "core", "target", "classes")), "the uninstalled sibling comes from the reactor");
+      assert.ok(!classpath.some((entry) => entry.includes("junit")), "test dependencies stay off the runtime classpath");
+      assert.equal(launch(service).trim(), "Hello, service greeting=hi there arguments=--port=0,typed env=set");
+    });
+
+    // Without a main class in the model, the compiled classes decide, as spring-boot-maven-plugin does.
+    const discovered = await prepare({ name: "Main", path: "app", tags: ["java-application"], properties: {} });
+    await check("a target without a main class runs the one the build compiled", () => {
+      assert.equal(discovered.arguments[discovered.arguments.indexOf("-cp") + 2], "demo.app.Main");
+      assert.equal(launch(discovered).trim(), "Hello, Maven");
+    });
+
+    const debug = await prepare({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: { mainClass: "demo.service.ServiceApplication" } }, {
+      launchOptions: { execution: "service", runtimeArguments: [], arguments: [], environment: {},
+        debug: { adapterID: "dev.example/java", configurationType: "java", target: { kind: "connection", host: "127.0.0.1", port: 51235 } } },
+    });
+    await check("a debug run suspends the service until the debugger attaches on the host's port", () => {
+      assert.ok(debug.arguments.includes("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:51235"));
+      assert.ok(debug.arguments.indexOf("-cp") > debug.arguments.findIndex((argument) => argument.startsWith("-agentlib:jdwp")));
+    });
+
+    await check("a failed build ends preparation with the provider's error", async () => {
+      writeFileSync(join(root, "service", "src", "main", "java", "demo", "service", "Broken.java"), "package demo.service; class Broken {");
+      try {
+        await assert.rejects(request({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: {} }, {
+          launchOptions: { execution: "service", runtimeArguments: [], arguments: [], environment: {} },
+        }), (error) => error.response?.data?.pluginErrorCode === "maven.run.buildFailed" || /Maven build failed/.test(error.message));
+      } finally {
+        rmSync(join(root, "service", "src", "main", "java", "demo", "service", "Broken.java"));
+      }
+    });
+    await report.step("stop the build provider", () => client.close());
+  } catch (error) {
+    client.kill();
+    throw error;
+  }
+}
+
 async function test(signal) {
   try {
     cpSync(resolve("test", "fixtures", "reactor"), root, { recursive: true });
@@ -127,7 +198,7 @@ async function test(signal) {
     await check("the model lists the reactor and its aggregator tree", () => {
       assert.equal(model.format, "litheBuildModel");
       assert.equal(model.version, 0);
-      assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app"]);
+      assert.deepEqual(model.projects.map((project) => project.name), ["reactor", "core", "app", "service"]);
       assert.equal(byName("reactor").displayName, "Demo Reactor");
       assert.equal(byName("core").parent, byName("reactor").path);
       assert.deepEqual(Object.fromEntries(["groupId","artifactId","version","packaging"].map(key=>[key,byName("app").properties[key]])), {
@@ -164,6 +235,19 @@ async function test(signal) {
       assert.ok(!model.contentRoots.some((entry) => entry.project === byName("reactor").path));
     });
 
+    await check("applications become the targets the run declarations select", () => {
+      const targets = model.targets.map((target) => [target.project, target.name, target.tags, target.properties]);
+      assert.deepEqual(targets, [
+        [byName("app").path, "Main", ["java-application"], { mainClass: "demo.app.Main" }],
+        [byName("service").path, "ServiceApplication", ["spring-boot"], { mainClass: "demo.service.ServiceApplication" }],
+      ]);
+      const runs = Object.fromEntries(buildSystem.run.map((run) => [run.id, run]));
+      assert.deepEqual(runs["spring-boot"].fromTargets.tags, ["spring-boot"]);
+      assert.equal(runs["spring-boot"].execution, "service");
+      assert.deepEqual(runs.application.fromTargets.tags, ["java-application"]);
+      assert.ok(buildSystem.run.every((run) => run.source === "provider"));
+    });
+
     const projectDependencies = await document("read project dependencies", buildSystem.dependencies, signal, { project: "app" });
     capture("app-dependencies.json", projectDependencies);
     await check("a project's tree resolves an uninstalled sibling from the reactor", () => {
@@ -177,17 +261,19 @@ async function test(signal) {
     capture("dependencies.json", workspaceDependencies);
     await check("the workspace tree has one node per project with transitive children", () => {
       const tree = workspaceDependencies;
-      assert.deepEqual(tree.dependencies.map((node) => node.name), ["reactor", "core", "app"]);
+      assert.deepEqual(tree.dependencies.map((node) => node.name), ["reactor", "core", "app", "service"]);
       const junit = tree.dependencies[1].children[0];
       assert.deepEqual([junit.name, junit.version, junit.scope], ["junit", "4.13.2", "test"]);
       assert.equal(junit.children[0].name, "hamcrest-core");
     });
 
     await check("reading the model and dependencies builds nothing", () => {
-      for (const directory of ["target", "core/target", "app/target"]) {
+      for (const directory of ["target", "core/target", "app/target", "service/target"]) {
         assert.ok(!existsSync(join(root, directory)), `${directory} was not created`);
       }
     });
+
+    await prepareRuns(signal);
 
     await run("run the filtered Maven test suite", root, buildSystem.test.arguments, signal, { project: "core", suite: "demo.core.GreeterTest" });
     await check("a filtered test run writes the report the results glob reads", () => {
