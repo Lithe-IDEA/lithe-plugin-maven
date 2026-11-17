@@ -2,11 +2,13 @@
 // Packages the plugin into dist/<name>-<version>-darwin.zip, the asset name
 // Lithe Store's release tracker recognizes (docs/publishing.md there).
 //
-// The package is plain data plus one jar, built here with Maven and copied to
-// lib/: the Maven core extension in extension/. Lithe never starts it; the
-// model and dependency commands in plugin.json load it into the user's own
-// Maven with -Dmaven.ext.class.path, and it writes the canonical documents
-// Lithe decodes. It carries no native code, so one archive serves every Mac and both Linux and
+// The package is plain data plus three jars in lib/: the Maven core extension
+// in extension/, built here with Maven, and two Java processes built with
+// javac: the settings backend (settings-backend/) and the build provider that
+// prepares runs (provider/). Lithe never starts the extension itself; the
+// model and dependency commands in plugin.json, and the provider's run
+// preparation, load it into the user's own Maven with -Dmaven.ext.class.path,
+// and it writes the documents they read. It carries no native code, so one archive serves every Mac and both Linux and
 // Windows architectures, copied as -linux.zip and -windows.zip. Packaging needs
 // POSIX zip, so it runs on macOS or Linux; scripts/test.mjs also runs on Windows.
 // The unpacked package stays in dist/package/ for installing a local
@@ -85,12 +87,18 @@ const report = createReport("package");
 const timeoutMs = mavenTimeout();
 await withInterrupts(async (signal) => {
   await verifySdk();
-  const build = "settings-backend/target";
   function sources(path) {return readdirSync(path,{withFileTypes:true}).flatMap(e=>e.isDirectory()?sources(join(path,e.name)):e.name.endsWith(".java")?[join(path,e.name)]:[]);}
-  rmSync(build,{recursive:true,force:true});mkdirSync(join(build,"classes"),{recursive:true});
-  await runCommand("javac",["--release","8","-encoding","UTF-8","-d",join(build,"classes"),...sources("settings-backend/src/main/java"),...sources("vendor/lithe-plugin-sdk-java/src/main/java")],{timeoutMs,signal});
-  writeFileSync(join(build,"MANIFEST.MF"),`Main-Class: io.github.litheidea.maven.settings.MavenSettings\nImplementation-Version: ${manifest.version}\n`);
-  await runCommand("jar",["--create","--file",join(build,"lithe-maven-settings.jar"),"--manifest",join(build,"MANIFEST.MF"),"--date","2026-11-15T00:00:00Z","-C",join(build,"classes"),"."],{timeoutMs,signal});
+  // Both Java processes Lithe starts are built the same way, with the vendored SDK, for Java 8:
+  // the settings backend and the build provider that prepares runs.
+  async function backendJar(directory, mainClass, jarName) {
+    const build = `${directory}/target`;
+    rmSync(build,{recursive:true,force:true});mkdirSync(join(build,"classes"),{recursive:true});
+    await runCommand("javac",["--release","8","-encoding","UTF-8","-d",join(build,"classes"),...sources(`${directory}/src/main/java`),...sources("vendor/lithe-plugin-sdk-java/src/main/java")],{timeoutMs,signal});
+    writeFileSync(join(build,"MANIFEST.MF"),`Main-Class: ${mainClass}\nImplementation-Version: ${manifest.version}\n`);
+    await runCommand("jar",["--create","--file",join(build,jarName),"--manifest",join(build,"MANIFEST.MF"),"--date","2026-11-15T00:00:00Z","-C",join(build,"classes"),"."],{timeoutMs,signal});
+  }
+  await backendJar("settings-backend", "io.github.litheidea.maven.settings.MavenSettings", "lithe-maven-settings.jar");
+  await backendJar("provider", "io.github.litheidea.maven.provider.RunProvider", "lithe-maven-provider.jar");
   try {
     await report.step("build the Maven extension", async () => {
       await runCommand(process.env.MVN ?? "mvn", ["-B", "-ntp", "-q", "-f", "extension/pom.xml", "clean", "package"], { timeoutMs, signal });
@@ -105,6 +113,7 @@ await withInterrupts(async (signal) => {
       mkdirSync(join(packageRoot, "lib"), { recursive: true });
       cpSync(EXTENSION_JAR, join(packageRoot, "lib", "lithe-maven-extension.jar"));
       cpSync("settings-backend/target/lithe-maven-settings.jar",join(packageRoot,"lib","lithe-maven-settings.jar"));
+      cpSync("provider/target/lithe-maven-provider.jar",join(packageRoot,"lib","lithe-maven-provider.jar"));
       cpSync("vendor/LICENSE",join(packageRoot,"SDK-LICENSE"));
       cpSync("LICENSE", join(packageRoot, "LICENSE"));
       cpSync("NOTICE", join(packageRoot, "NOTICE"));
