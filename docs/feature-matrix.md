@@ -31,7 +31,7 @@ CI 在 Windows x64 上用 `mvn.cmd` 运行声明的模型、依赖和测试命�
 | `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | implemented / pending | 没有自动化覆盖 |
 | `maven-user-settings-editing` | 编辑用户级 `~/.m2/settings.xml` 的本地仓库 | missing / not-applicable | missing / not-applicable | — |
 | `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
-| `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行（调试待宿主支持） | implemented / pending | implemented / pending | 2026-11-17 宿主端到端测试和 `scripts/test.mjs` 通过（macOS）；`scripts/test.mjs` 在 Windows CI 通过 |
+| `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行与调试 | implemented / pending | implemented / pending | 2026-11-17 宿主端到端测试（运行与断点调试）和 `scripts/test.mjs` 通过（macOS）；`scripts/test.mjs` 在 Windows CI 通过 |
 
 前六条从主仓库迁移；`maven-project-generators` 是本仓库新增，用来记录随测试一起迁来的新建项目测试；`maven-run-applications` 随运行配置一起新增（[1lck/Lithe-IDEA#2074](https://github.com/1lck/Lithe-IDEA/issues/2074)）。
 
@@ -202,7 +202,7 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 **能力**：读取项目时把 Spring Boot 应用（`@SpringBootApplication` 类或 `spring-boot-maven-plugin`）和写明主类的
 Java 应用（`exec-maven-plugin`、jar 清单）列为 target，`run` 声明把它们变成运行配置；构建提供者
 `lib/lithe-maven-provider.jar` 准备运行：编译模块及其反应堆依赖，导出运行时类路径和主类，返回 `java -cp … 主类`。
-Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端口请求时，提供者加 `-agentlib:jdwp` 挂起到调试器连上；Lithe 桌面端尚未实现这段宿主流程（[1lck/Lithe-IDEA#2107](https://github.com/1lck/Lithe-IDEA/issues/2107)），所以调试目前不可用。
+Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端口请求时，提供者加 `-agentlib:jdwp` 挂起到调试器连上，宿主再用已启用的 `java` 类型适配器（Java Support）连接（宿主流程见 [1lck/Lithe-IDEA#2113](https://github.com/1lck/Lithe-IDEA/pull/2113)）。
 
 **证据**：`plugin.json` 的 `buildSystems[0].provider` 和 `buildSystems[0].run`、`extension/.../Applications.java`、
 `extension/.../RunExport.java`、`provider/`、`scripts/test.mjs` 的运行准备检查、`test/fixtures/reactor/service/`。
@@ -210,7 +210,11 @@ Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端�
 **依赖的宿主能力**：`buildProviders`（独立提供者进程和 `lithe/build/prepareRun`）、运行配置解析（`fromTargets`）、
 注册表连接调试（`debug.configurationType: java`，需要启用一个提供 `java` 类型 `attach` 的调试适配器）。
 
-**最近验证**：2026-11-17，macOS arm64，插件 1.0.0 打包产物，宿主 `75edb9674`（合入 1lck/Lithe-IDEA#2102 的 main），`node scripts/e2e-host.mjs`：
+**最近验证**：2026-11-17，macOS arm64，插件 1.0.0 打包产物，宿主 `1ce4085e7`（合入 1lck/Lithe-IDEA#2113 的 main），`node scripts/e2e-host.mjs`：
+
+- `TestOfficialMavenPluginDebugsASpringBootApplication` PASS（约 16s）：和 Java Support 4.0.1 发布包一起安装，在
+  `ShopApplication.java` 设断点后从标题栏点调试；服务以挂起方式启动，`java` 适配器连上；`GET /hello` 停在断点，
+  请求在断点处阻塞，继续后返回 `Hello, Lithe from eu-west`；在调试窗口停止后服务结束、端口释放；插件安装目录不变。
 
 - `TestOfficialMavenPluginRunsASpringBootApplication` PASS（6.2s）：和 Java Support 4.0.1 发布包一起安装，打开真实的两模块
   Spring Boot 3.5.13 项目；运行配置下拉只列出服务 `ShopApplication`；编辑器保存的 JVM 参数、程序参数和环境变量传到了进程
@@ -219,7 +223,8 @@ Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端�
 - `node scripts/test.mjs`：提供者的运行准备、类路径、主类选择、调试参数和编译失败。
 
 这次实测发现并在 #2102 修好了四个宿主问题：声明了提供者进程的构建系统读取写文件的依赖命令时缺少输出文件、设置页按提供者读取模型、
-未命名的运行配置带上了运行 ID 前缀、准备运行时的构建输出没有显示。调试没有验收（宿主尚未支持，见上）。Windows 没有运行。
+未命名的运行配置带上了运行 ID 前缀、准备运行时的构建输出没有显示。调试的实测又发现并在 #2113 修好了三个宿主问题：
+调试适配器列表在插件变化后不刷新、运行进程 30 分钟后被准备时限结束、JDT LS 就绪后才注册命令时请求调试端口被拒。Windows 没有运行。
 
 **验证方法**（macOS）：
 
@@ -227,6 +232,6 @@ Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端�
 2. 标题栏运行配置菜单列出每个应用；选中 Spring Boot 应用点运行，运行窗口先显示 Maven 编译输出，再显示应用输出；
    停止后应用进程退出。
 3. 在运行配置编辑器里改 JVM 参数、程序参数、环境变量和入口，再次运行时生效。
-4. 宿主支持后（1lck/Lithe-IDEA#2107）：启用 Java 调试适配器，调试 Spring Boot 应用，断点命中。
+4. 同时安装 Java Support，在 Spring Boot 应用里设断点后点调试：断点命中，继续后请求完成，停止后服务结束。
 5. 制造编译错误后运行，看到“Maven 编译失败”的提示，没有启动残缺的应用。
 6. 整个过程中插件安装目录不被写入。

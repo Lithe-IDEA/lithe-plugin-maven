@@ -113,8 +113,9 @@ brew install maven
    target 的 `mainClass`、编译结果里唯一的主类（Spring Boot 优先带注解的类）；有多个时报错并列出候选。
    类路径超过 24 000 个字符时写进 `target/lithe-run/` 下只含清单的 jar，避开 Windows 命令行长度限制。
 4. 清单为 Spring Boot 运行声明了按配置类型连接的调试（`debug.configurationType: java`）：宿主带着调试端口请求时，
-   提供者加 `-agentlib:jdwp=…,suspend=y`，服务停在启动处等 Java 调试器连上。Lithe 桌面端还没有实现这段宿主流程
-   （[1lck/Lithe-IDEA#2107](https://github.com/1lck/Lithe-IDEA/issues/2107)），目前点调试会提示这个配置不能调试。
+   提供者加 `-agentlib:jdwp=…,suspend=y`，服务停在启动处等 Java 调试器连上。点调试时，Lithe 选出已启用的、能连接 `java` 类型的调试适配器
+   （安装 [Java Support](https://github.com/Lithe-IDEA/lithe-plugin-java) 即可），分配端口、启动服务并连上调试器；
+   在调试窗口停止会一起结束服务。需要 Lithe 桌面端包含 [1lck/Lithe-IDEA#2113](https://github.com/1lck/Lithe-IDEA/pull/2113)。
 
 不经过 `spring-boot:run`，Lithe 停止的就是应用进程本身。运行配置里的 JVM 参数、程序参数、环境变量和工作目录
 原样带到启动命令。
