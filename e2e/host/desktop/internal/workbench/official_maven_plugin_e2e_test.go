@@ -36,7 +36,19 @@ func installOfficialPluginArchive(t *testing.T, h *harness, archive, id string) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The app gives its service these resolvers when it opens it (app.go); a provider or backend
+	// that runs on a tool, such as a jar on java, cannot start without them.
+	service.Backend.SetToolResolver(h.app.resolveBackendTool)
+	service.Backend.SetToolEntryResolver(h.app.resolveBackendToolEntry)
+	service.LanguageTool = h.app.resolveLanguageTool
 	h.app.plugins = service
+	return installPluginArchiveInto(t, service, archive, id)
+}
+
+// installPluginArchiveInto installs and enables archive in service's plugin root, next to the
+// plugins already there, and returns the installed package directory.
+func installPluginArchiveInto(t *testing.T, service *pluginservice.Service, archive, id string) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	plan, err := service.Installer.Prepare(ctx, plugininstall.Request{ArchivePath: archive, Root: service.Root, Source: plugintrust.Disk})
@@ -154,11 +166,12 @@ func awaitBuildModel(t *testing.T, h *harness, p *project, buildSystemID string,
 func runBuildTaskToEnd(t *testing.T, h *harness, p *project, projectID, taskID string, limit time.Duration) string {
 	t.Helper()
 	p.build.projectID, p.build.targetID, p.build.taskID = projectID, "", taskID
-	if _, err := h.app.runBuildTask(p, projectID, "", taskID, nil); err != nil {
+	op, err := h.app.runBuildTask(p, projectID, "", taskID, nil)
+	if err != nil {
 		t.Fatalf("start %s: %v", taskID, err)
 	}
 	awaitStateWithin(t, h, limit, "the "+taskID+" task", func() bool { return p.build.operation == nil })
-	output := strings.Join(p.build.output, "")
+	output := op.session.output.all()
 	if p.build.status != h.app.text.Build.Succeeded {
 		t.Fatalf("%s did not succeed: status=%q output=%q", taskID, p.build.status, output)
 	}

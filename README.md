@@ -25,7 +25,7 @@
 | 彩色输出 | 每条 Maven 命令都带 `-Dstyle.color=always`，即使输出不是终端也保留 Maven 的颜色；Lithe 的构建、运行和测试控制台按颜色显示 `[INFO]`、`[WARNING]`、`[ERROR]` 和 `BUILD SUCCESS`，匹配诊断前会先去掉颜色转义 |
 | 依赖 | 显示整个反应堆或单个模块的依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
-| 运行配置 | Spring Boot 应用和写明主类的 Java 应用自动出现在标题栏的运行配置里，可以运行、调试（Spring Boot）和编辑参数，见下面的「运行应用」 |
+| 运行配置 | Spring Boot 应用和写明主类的 Java 应用自动出现在标题栏的运行配置里，可以运行和编辑参数，见下面的「运行应用」 |
 
 ## 设置和构建选项
 
@@ -97,7 +97,7 @@ brew install maven
 
 | 运行配置 | 来源 | 执行方式 |
 | --- | --- | --- |
-| `spring-boot` | 源码根里带 `@SpringBootApplication` 的类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务，可调试 |
+| `spring-boot` | 源码根里带 `@SpringBootApplication` 的类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务 |
 | `application` | `exec-maven-plugin` 的 `mainClass` 或 jar 清单 `archive/manifest/mainClass` 写明主类的模块 | 应用 |
 
 列 target 只读源码开头和 POM，不编译。运行时 Lithe 启动随包的构建提供者 `lib/lithe-maven-provider.jar`
@@ -110,8 +110,9 @@ brew install maven
 3. 返回 `java -cp <类路径> <主类>`，由 Lithe 用项目的 JDK 启动并管理这个进程。主类依次取运行配置的入口、
    target 的 `mainClass`、编译结果里唯一的主类（Spring Boot 优先带注解的类）；有多个时报错并列出候选。
    类路径超过 24 000 个字符时写进 `target/lithe-run/` 下只含清单的 jar，避开 Windows 命令行长度限制。
-4. 调试 Spring Boot 服务时加 `-agentlib:jdwp=…,suspend=y`，服务停在启动处，等 Lithe 选中的 Java 调试器连到
-   Lithe 分配的端口。
+4. 清单为 Spring Boot 运行声明了按配置类型连接的调试（`debug.configurationType: java`）：宿主带着调试端口请求时，
+   提供者加 `-agentlib:jdwp=…,suspend=y`，服务停在启动处等 Java 调试器连上。Lithe 桌面端还没有实现这段宿主流程
+   （[1lck/Lithe-IDEA#2107](https://github.com/1lck/Lithe-IDEA/issues/2107)），目前点调试会提示这个配置不能调试。
 
 不经过 `spring-boot:run`，Lithe 停止的就是应用进程本身。运行配置里的 JVM 参数、程序参数、环境变量和工作目录
 原样带到启动命令。
@@ -195,6 +196,10 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 
 - `TestOfficialMavenPluginBuildsAReactor`（宿主的 `desktop/internal/workbench` 包）：读取两模块反应堆的模型和依赖树，
   改 Maven executable 设置后重新读取并运行 `compile`，最后确认插件安装目录没有被写入。
+- `TestOfficialMavenPluginRunsASpringBootApplication`（`desktop/internal/workbench` 包）：和 Java Support 插件包一起安装，
+  打开一个真实的两模块 Spring Boot 3.5 项目（`spring-boot-starter-web`），确认运行配置下拉只列出 `ShopApplication`（服务），
+  用运行配置编辑器保存 JVM 参数、程序参数和环境变量，运行后检查控制台里的 Maven 构建日志和 Spring Boot 启动日志，
+  请求 `/hello` 确认三项设置都传到了进程；停止后确认服务不再响应、端口已释放，插件安装目录没有被写入。
 - `TestMavenPluginProjectGeneratesABuildableMavenProject`、`TestMavenPluginArchetypeRunsRealMaven`（`desktop/internal/projectgen` 包）：
   用清单里的两个新建项目条目生成项目。
 
@@ -205,10 +210,15 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
 
 ```bash
 node scripts/package.mjs
-LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" node scripts/e2e-host.mjs
+gh release download --repo Lithe-IDEA/lithe-plugin-java --pattern 'Lithe-Java-Support-*-darwin-arm64.zip' --dir .artifacts/java-plugin
+LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/dist/maven-build-<版本>-darwin.zip" \
+LITHE_TEST_JAVA_PLUGIN_ARCHIVE="$PWD/.artifacts/java-plugin/Lithe-Java-Support-<版本>-darwin-arm64.zip" \
+node scripts/e2e-host.mjs
 ```
 
-- `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE` 必须设置，脚本不会因为缺少插件包而跳过测试。
+- `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE` 和 `LITHE_TEST_JAVA_PLUGIN_ARCHIVE` 都必须设置，脚本不会因为缺少插件包而跳过测试。
+  运行计划用 `java` 工具启动应用，这个工具由 Java Support 插件定义，所以运行测试要装上它。
+- 运行测试使用本机 `~/.m2` 和 Maven 设置，第一次运行会下载 Spring Boot 3.5 的依赖，项目需要 JDK 17 及以上。
 - 新建项目测试读取 `LITHE_PLUGIN_MAVEN_DIR` 里的 `plugin.json` 和模板，默认是本仓库的 `io.github.lithe-idea.maven-build/`。
 - 原型测试要从 Maven Central 下载原型插件，只在设置了 `LITHE_INTEGRATION_NETWORK=1` 和 `JAVA_HOME` 时运行，否则跳过。
 
