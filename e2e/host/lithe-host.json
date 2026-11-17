@@ -1,14 +1,14 @@
 {
   "repository": "https://github.com/1lck/Lithe-IDEA.git",
-  "revision": "75edb9674b655eb151b35ed34518731cec9e9b8b",
+  "revision": "1ce4085e7012a8b9e887c5bab734ef3fd561a7f8",
   "packages": {
-    "./internal/workbench": "^TestOfficialMavenPlugin(BuildsAReactor|RunsASpringBootApplication)$",
+    "./internal/workbench": "^TestOfficialMavenPlugin(BuildsAReactor|RunsASpringBootApplication|DebugsASpringBootApplication)$",
     "./internal/projectgen": "^TestMavenPlugin"
   },
   "requiredEnvironment": {
     "LITHE_TEST_MAVEN_PLUGIN_ARCHIVE": "maven-build-<version>-darwin.zip to install, for example dist/maven-build-0.0.1-darwin.zip",
     "LITHE_PLUGIN_MAVEN_DIR": "directory holding the plugin.json and templates; defaults to this repository's",
-    "LITHE_TEST_JAVA_PLUGIN_ARCHIVE": "Lithe-Java-Support-<version>-darwin-<arch>.zip from Lithe-IDEA/lithe-plugin-java releases; its java tool launches the run"
+    "LITHE_TEST_JAVA_PLUGIN_ARCHIVE": "Lithe-Java-Support-<version>-darwin-<arch>.zip from Lithe-IDEA/lithe-plugin-java releases; its java tool launches the run and its java adapter debugs it"
   },
   "repositoryEnvironment": {
     "LITHE_PLUGIN_MAVEN_DIR": "io.github.lithe-idea.maven-build"

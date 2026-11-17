@@ -37,10 +37,12 @@ func installOfficialPluginArchive(t *testing.T, h *harness, archive, id string) 
 		t.Fatal(err)
 	}
 	// The app gives its service these resolvers when it opens it (app.go); a provider or backend
-	// that runs on a tool, such as a jar on java, cannot start without them.
+	// that runs on a tool, such as a jar on java, cannot start without them, and a language
+	// server whose launch uses ${logDir} cannot start without the log directory.
 	service.Backend.SetToolResolver(h.app.resolveBackendTool)
 	service.Backend.SetToolEntryResolver(h.app.resolveBackendToolEntry)
 	service.LanguageTool = h.app.resolveLanguageTool
+	service.LogDirectory = h.app.pluginLogDirectory
 	h.app.plugins = service
 	return installPluginArchiveInto(t, service, archive, id)
 }
