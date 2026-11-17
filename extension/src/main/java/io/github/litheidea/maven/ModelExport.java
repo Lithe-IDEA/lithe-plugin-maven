@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import org.apache.maven.MavenExecutionException;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.model.PluginExecution;
@@ -27,8 +28,9 @@ import org.slf4j.LoggerFactory;
 /**
  * Builds the {@code litheBuildModel} document from the reactor Maven has
  * just read: every project with its coordinates and source folders, the
- * goals of every build plugin as model tasks, and the profile IDs the
- * Profiles option offers.
+ * goals of every build plugin as model tasks, the applications Lithe offers
+ * as run configurations (see {@link Applications}) as model targets, and the
+ * profile IDs the Profiles option offers.
  *
  * <p>Paths are absolute; Lithe makes them relative to the build root and
  * drops any outside the workspace.
@@ -55,6 +57,7 @@ final class ModelExport {
         List<Object> projects = new ArrayList<>();
         List<Object> tasks = new ArrayList<>();
         List<Object> contentRoots = new ArrayList<>();
+        List<Object> targets = new ArrayList<>();
         Map<String, File> aggregators = aggregators();
         for (MavenProject project : session.getProjects()) {
             String path = path(project.getBasedir());
@@ -84,6 +87,9 @@ final class ModelExport {
             if (!"pom".equals(project.getPackaging())) {
                 addContentRoots(project, path, contentRoots);
             }
+            for (Applications.Application application : Applications.of(project)) {
+                targets.add(application.target(path));
+            }
             addGoals(project, path, tasks);
         }
         Map<String, Object> optionValues = new LinkedHashMap<>();
@@ -92,6 +98,7 @@ final class ModelExport {
         document.put("format", "litheBuildModel");
         document.put("version", 0);
         document.put("projects", projects);
+        document.put("targets", targets);
         document.put("tasks", tasks);
         document.put("contentRoots", contentRoots);
         document.put("optionValues", optionValues);
@@ -309,6 +316,21 @@ final class ModelExport {
         }
         File file = new File(path);
         return file.isAbsolute() ? file : new File(basedir, path);
+    }
+
+    /**
+     * The reactor project at projectPath, relative to the directory Maven
+     * runs in.
+     */
+    static MavenProject project(MavenSession session, String projectPath) throws MavenExecutionException {
+        String wanted = key(new File(session.getExecutionRootDirectory(), projectPath));
+        for (MavenProject project : session.getProjects()) {
+            if (key(project.getBasedir()).equals(wanted)) {
+                return project;
+            }
+        }
+        throw new MavenExecutionException(
+                "Lithe found no project at " + projectPath + " in this reactor.", (File) null);
     }
 
     static String path(File file) {

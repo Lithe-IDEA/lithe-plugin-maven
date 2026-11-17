@@ -4,3 +4,4 @@ extension/target/
 .DS_Store
 .cache/
 settings-backend/target/
+provider/target/

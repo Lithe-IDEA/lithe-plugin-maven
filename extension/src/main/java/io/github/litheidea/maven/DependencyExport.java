@@ -59,7 +59,7 @@ final class DependencyExport {
                 dependencies.add(node);
             }
         } else {
-            dependencies.addAll(children(graph(project(projectPath))));
+            dependencies.addAll(children(graph(ModelExport.project(session, projectPath))));
         }
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("format", "litheDependencies");
@@ -68,16 +68,6 @@ final class DependencyExport {
         return document;
     }
 
-    private MavenProject project(String projectPath) throws MavenExecutionException {
-        String wanted = ModelExport.key(new File(session.getExecutionRootDirectory(), projectPath));
-        for (MavenProject project : session.getProjects()) {
-            if (ModelExport.key(project.getBasedir()).equals(wanted)) {
-                return project;
-            }
-        }
-        throw new MavenExecutionException(
-                "Lithe found no project at " + projectPath + " in this reactor.", (File) null);
-    }
 
     private DependencyNode graph(MavenProject project) throws MavenExecutionException {
         DefaultDependencyResolutionRequest request =
