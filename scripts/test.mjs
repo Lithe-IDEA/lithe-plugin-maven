@@ -216,6 +216,70 @@ async function test(signal) {
 
     await check("profiles become choices of the Profiles option", () => {
       assert.deepEqual(model.optionValues.profiles, ["ci", "release"]);
+      assert.equal(model.optionDefaults, undefined);
+      assert.deepEqual(model.optionExcludePrefixes, { profiles: "-" });
+    });
+
+    await check("default-active profiles stay reported across -P switches and deactivations", async () => {
+      const profileRoot = join(scratch, "profiles-reactor");
+      mkdirSync(join(profileRoot, "dev-module"), { recursive: true });
+      mkdirSync(join(profileRoot, "prod-module"), { recursive: true });
+      writeFileSync(join(profileRoot, "pom.xml"), [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>demo</groupId>",
+        "  <artifactId>profiles-reactor</artifactId>",
+        "  <version>1.0.0-SNAPSHOT</version>",
+        "  <packaging>pom</packaging>",
+        "  <profiles>",
+        "    <profile>",
+        "      <id>dev</id>",
+        "      <activation><activeByDefault>true</activeByDefault></activation>",
+        "      <modules><module>dev-module</module></modules>",
+        "    </profile>",
+        "    <profile>",
+        "      <id>prod</id>",
+        "      <modules><module>prod-module</module></modules>",
+        "    </profile>",
+        "  </profiles>",
+        "</project>",
+      ].join("\n"));
+      for (const name of ["dev-module", "prod-module"]) {
+        writeFileSync(join(profileRoot, name, "pom.xml"), [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+          "  <modelVersion>4.0.0</modelVersion>",
+          "  <parent><groupId>demo</groupId><artifactId>profiles-reactor</artifactId><version>1.0.0-SNAPSHOT</version></parent>",
+          `  <artifactId>${name}</artifactId>`,
+          "</project>",
+        ].join("\n"));
+      }
+      const readProfileModel = async (tag, profileArg) => {
+        const outputFile = join(outputs, `profiles-${tag}.json`);
+        const extra = profileArg ? ["-P", profileArg] : [];
+        const argv = [
+          ...expand(buildSystem.invocation.globalArguments, { outputFile }),
+          ...extra,
+          ...expand(buildSystem.model.arguments, { outputFile }),
+        ];
+        await runCommand(maven, argv, { cwd: profileRoot, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal });
+        return JSON.parse(readFileSync(outputFile, "utf8"));
+      };
+
+      const initial = await readProfileModel("default", "");
+      assert.deepEqual(initial.optionValues.profiles, ["dev", "prod"]);
+      assert.deepEqual(initial.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(initial.optionExcludePrefixes, { profiles: "-" });
+      assert.deepEqual(initial.projects.map((project) => project.name), ["profiles-reactor", "dev-module"]);
+
+      const switched = await readProfileModel("switched", "-dev,prod");
+      assert.deepEqual(switched.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(switched.projects.map((project) => project.name), ["profiles-reactor", "prod-module"]);
+
+      const cleared = await readProfileModel("cleared", "-dev");
+      assert.deepEqual(cleared.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(cleared.projects.map((project) => project.name), ["profiles-reactor"]);
     });
 
     await check("plugin goals are model tasks filed under Plugins", () => {

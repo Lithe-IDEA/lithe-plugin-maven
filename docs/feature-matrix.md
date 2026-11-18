@@ -63,14 +63,15 @@ JDT 侧的项目导入归 Java Support 插件维护。
 ## java-maven-profiles-dependencies
 
 **能力**：构建选项 Profiles 传 `-P <profile>`，候选值从反应堆、父 POM 和 `settings.xml` 读取，也可以手动补充；
+随包 Maven 扩展用 Maven 自身的 `ProfileSelector` 计算无 `-P` 时的默认激活 Profile（`<activeByDefault>`、`settings.xml` `<activeProfiles>` 与条件激活）写入 `optionDefaults.profiles`，并输出 `optionExcludePrefixes.profiles = "-"`，支持在 Build 工具窗口树、构建选项和运行配置里勾选启用或以 `-<profile>` 显式取消默认激活 Profile；
 依赖树显示整个反应堆或单个模块的依赖（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析。
 
-**证据**：`plugin.json` 的 `buildSystems[0].options`（`profiles`）和 `buildSystems[0].dependencies`、`extension/`、
+**证据**：`plugin.json` 的 `buildSystems[0].options`（`profiles`）和 `buildSystems[0].dependencies`、`extension/`（`ModelExport.java`）、
 `scripts/test.mjs`、宿主端到端测试里 `app` 模块依赖 `core` 的检查。
 
-**依赖的宿主能力**：`buildSystems` 的构建选项、依赖命令和 `litheDependencies` 解码。
+**依赖的宿主能力**：`buildSystems` 的构建选项（含 `optionDefaults`、`optionExcludePrefixes` 与 `presentation: "tree"` 勾选树节点）、依赖命令和 `litheDependencies` 解码。
 
-**最近验证**：2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 检查了 `app` 对反应堆兄弟模块 `core` 的依赖。Profiles 切换、作用域、传递依赖和大依赖树没有自动化覆盖。
+**最近验证**：2026-11-18，macOS arm64，插件 1.0.0 打包产物，`node scripts/test.mjs` 验证了反应堆 `optionValues.profiles`、`optionDefaults.profiles`（`<activeByDefault>`）与 `optionExcludePrefixes.profiles = "-"` 的导出，以及通过 `-P -dev,prod` 切换激活模块和 `-P -dev` 取消全部默认 Profile 后模型按新 Profile 重读且 `optionDefaults` 保持不变；2026-11-14 宿主端到端测试 `TestOfficialMavenPluginBuildsAReactor` 检查了 `app` 对反应堆兄弟模块 `core` 的依赖。完整原生 UI 手工验收与大依赖树仍待执行。
 
 **验证方法**（macOS）：
 
