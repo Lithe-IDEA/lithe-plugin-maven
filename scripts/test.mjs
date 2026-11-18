@@ -160,6 +160,31 @@ async function prepareRuns(signal) {
       assert.equal(launch(discovered).trim(), "Hello, Maven");
     });
 
+    // Run on Current File: the provider names the class with a main method in one source file,
+    // and an entrypoint run prepares it without a target.
+    const entrypoints = (file) => report.step(`find the entrypoints of ${file}`, () => client.request("lithe/build/runEntrypoints", {
+      operationID: `entrypoints-${++operation}`, buildSystemID: "maven", root: ".", file,
+    }));
+    const mainEntrypoints = await entrypoints("app/src/main/java/demo/app/Main.java");
+    const libraryEntrypoints = await entrypoints("core/src/main/java/demo/core/Greeter.java");
+    const testEntrypoints = await entrypoints("core/src/test/java/demo/core/GreeterTest.java");
+    await check("a source file with a main method names its class and module", () => {
+      assert.deepEqual(mainEntrypoints, { format: "litheRunEntrypoints", version: 0, entrypoints: [
+        { run: "main", name: "Main", entrypoint: "demo.app.Main", project: { name: "app", path: "app" } },
+      ] });
+      assert.deepEqual(libraryEntrypoints.entrypoints, [], "a class without main has no entrypoint");
+      assert.deepEqual(testEntrypoints.entrypoints, [], "test sources are not on the runtime classpath");
+    });
+    const entrypoint = await report.step("prepare the Main entrypoint", () => client.request("lithe/build/prepareRun", {
+      operationID: `run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      tool: { executable: maven }, run: "main", project: { name: "app", path: "app" }, userArguments: [],
+      launchOptions: { execution: "application", runtimeArguments: [], arguments: [], environment: {}, entrypoint: "demo.app.Main" },
+    }));
+    await check("an entrypoint run starts the chosen class without a target", () => {
+      assert.equal(entrypoint.arguments[entrypoint.arguments.indexOf("-cp") + 2], "demo.app.Main");
+      assert.equal(launch(entrypoint).trim(), "Hello, Maven");
+    });
+
     const debug = await prepare({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: { mainClass: "demo.service.ServiceApplication" } }, {
       launchOptions: { execution: "service", runtimeArguments: [], arguments: [], environment: {},
         debug: { adapterID: "dev.example/java", configurationType: "java", target: { kind: "connection", host: "127.0.0.1", port: 51235 } } },
@@ -251,6 +276,8 @@ async function test(signal) {
       assert.equal(runs["spring-boot"].execution, "service");
       assert.deepEqual(runs.application.fromTargets.tags, ["java-application"]);
       assert.ok(buildSystem.run.every((run) => run.source === "provider"));
+      assert.equal(runs.main.entrypoints, true, "Run on Current File starts any main class through the main run");
+      assert.equal(manifest.requires.buildProviders, 1);
     });
 
     const projectDependencies = await document("read project dependencies", buildSystem.dependencies, signal, { project: "app" });

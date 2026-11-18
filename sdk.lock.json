@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "source": {
     "repository": "https://github.com/Lithe-IDEA/Lithe-core-rust",
-    "revision": "9425469bdaa5a8195d9cdf5e9f440165c9e79810"
+    "revision": "d833d6a71dfeaa5eda39d23f6a3a1a9ee29ff9ed"
   },
   "files": [
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/Backend.java",
       "path": "vendor/lithe-plugin-sdk-java/src/main/java/io/github/litheidea/plugin/sdk/Backend.java",
-      "sha256": "3be1cee3007bc55786ae62894d2366aabce2a9af0669acfbc030e0afe3d90c9e"
+      "sha256": "a5f7ea6bc0cf5e78e663203d7cc65fb2522ebcf99462c24ebf0f6422bcb6d16c"
     },
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/CallContext.java",
@@ -28,7 +28,7 @@
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/Diagnostics.java",
       "path": "vendor/lithe-plugin-sdk-java/src/main/java/io/github/litheidea/plugin/sdk/Diagnostics.java",
-      "sha256": "1268691d9cb950776e9f659d11d9480e51069e90aa6437f2809ac0e00c3a57d4"
+      "sha256": "a1e6fa4b743c0702a4b7f462cbad9539da32a523e51d8bf8a6a054bec82d14df"
     },
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/Framing.java",
@@ -73,7 +73,7 @@
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/Protocol.java",
       "path": "vendor/lithe-plugin-sdk-java/src/main/java/io/github/litheidea/plugin/sdk/Protocol.java",
-      "sha256": "c6e2fa8db5ffec78e757f3bdc4622e2beb6f697178f3631fd53e29e9237e29b7"
+      "sha256": "c84c26121c2997826269c5503dbd11cf437acfa13c2ab3c4f2ea29652a096712"
     },
     {
       "upstream": "shared/plugins/sdk/java/plugin-sdk/src/main/java/io/github/litheidea/plugin/sdk/StateStore.java",
