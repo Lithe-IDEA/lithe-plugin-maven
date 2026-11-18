@@ -136,6 +136,28 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v4
+        with:
+          name: maven-build-windows
+          path: .artifacts/profile-host-package
+      - name: Test Maven Profile switching in the desktop host
+        run: |
+          compatible="$(node -p '
+            const {requires} = require("./io.github.lithe-idea.maven-build/plugin.json");
+            require("./e2e/host/lithe-host.json").suites.profiles.hostBuildProviders.includes(requires.buildProviders)
+          ')"
+          if [[ "$compatible" == "false" ]]; then
+            echo "::notice::The pinned Profile-tree host cannot install this buildProviders version. The Maven integration matrix still tests Profile activation."
+            exit 0
+          fi
+          version="$(node -p 'require("./io.github.lithe-idea.maven-build/plugin.json").version')"
+          export LITHE_TEST_MAVEN_PLUGIN_ARCHIVE="$PWD/.artifacts/profile-host-package/maven-build-$version-windows.zip"
+          node scripts/e2e-host.mjs --suite profiles
+
   # The Windows archive built above, unpacked the way Lithe installs it (under
   # a path with a space), runs the declared commands through mvn.cmd.
   windows:

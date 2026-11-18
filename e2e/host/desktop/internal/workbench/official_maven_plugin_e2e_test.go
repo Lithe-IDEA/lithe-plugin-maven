@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/1lck/Lithe-IDEA/desktop/internal/core"
+	"github.com/1lck/Lithe-IDEA/desktop/internal/i18n"
 	"github.com/1lck/Lithe-IDEA/desktop/internal/plugininstall"
 	"github.com/1lck/Lithe-IDEA/desktop/internal/pluginservice"
 	"github.com/1lck/Lithe-IDEA/desktop/internal/pluginsettings"
@@ -174,7 +175,7 @@ func runBuildTaskToEnd(t *testing.T, h *harness, p *project, projectID, taskID s
 	}
 	awaitStateWithin(t, h, limit, "the "+taskID+" task", func() bool { return p.build.operation == nil })
 	output := op.session.output.all()
-	if p.build.status != h.app.text.Build.Succeeded {
+	if op.session.outcome != runSucceeded {
 		t.Fatalf("%s did not succeed: status=%q output=%q", taskID, p.build.status, output)
 	}
 	return output
@@ -326,6 +327,112 @@ func TestOfficialMavenPluginBuildsAReactor(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(class))); err != nil {
 			t.Fatalf("mvn compile did not produce %s: %v", class, err)
 		}
+	}
+	h.app.closeProject()
+	awaitStateWithin(t, h, 30*time.Second, "the closed project", func() bool { return h.app.project == nil })
+	h.settle()
+	assertPackageUnchanged(t, installed, before)
+}
+
+// TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree installs the Maven Build archive,
+// verifies a Profile enabled by .mvn/maven.config appears checked in the Build tool window,
+// toggles from dev to prod through the real checkbox UI, and checks that model reload,
+// compile and project reopen all honor -P -dev,prod.
+func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
+	archive := os.Getenv("LITHE_TEST_MAVEN_PLUGIN_ARCHIVE")
+	if archive == "" {
+		t.Skip("set LITHE_TEST_MAVEN_PLUGIN_ARCHIVE to a maven-build-<version>-darwin.zip")
+	}
+	if _, err := exec.LookPath("mvn"); err != nil {
+		t.Fatalf("mvn is not on PATH: %v", err)
+	}
+	h := newHarness(t, &testKernel{Client: core.NewClient()})
+	installed := installOfficialPluginArchive(t, h, archive, "io.github.lithe-idea.maven-build")
+	before := packageDigest(t, installed)
+	root := t.TempDir()
+	modulePom := func(name string) string {
+		return "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n" +
+			"  <parent><groupId>demo</groupId><artifactId>reactor</artifactId><version>1.0.0-SNAPSHOT</version></parent>\n" +
+			"  <artifactId>" + name + "</artifactId>\n</project>\n"
+	}
+	writePluginFixture(t, root, map[string]string{
+		"pom.xml": "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n" +
+			"  <groupId>demo</groupId><artifactId>reactor</artifactId><version>1.0.0-SNAPSHOT</version><packaging>pom</packaging>\n" +
+			"  <properties><maven.compiler.release>11</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>\n" +
+			"  <profiles>\n" +
+			"    <profile><id>dev</id><modules><module>dev-mod</module></modules></profile>\n" +
+			"    <profile><id>prod</id><modules><module>prod-mod</module></modules></profile>\n" +
+			"  </profiles>\n</project>\n",
+		".mvn/maven.config": "-Pdev\n",
+		"dev-mod/pom.xml":   modulePom("dev-mod"),
+		"dev-mod/src/main/java/demo/dev/DevOnly.java": "package demo.dev;\npublic final class DevOnly {}\n",
+		"prod-mod/pom.xml": modulePom("prod-mod"),
+		"prod-mod/src/main/java/demo/prod/ProdOk.java": "package demo.prod;\npublic final class ProdOk {}\n",
+	})
+	h.open(root)
+	p := h.app.project
+	if p == nil {
+		t.Fatal("the reactor did not open")
+	}
+	h.app.reduceChrome(core.ToggleChrome(itemBuild))
+	instance := awaitBuildModel(t, h, p, "maven", 3*time.Minute)
+	if modelProjectNamed(instance.Model, "dev-mod") == nil || modelProjectNamed(instance.Model, "prod-mod") != nil {
+		t.Fatalf("initial projects = %+v, want the project config to activate dev-mod", instance.Model.Projects)
+	}
+
+	awaitStateWithin(t, h, 30*time.Second, "the Build tree layout", func() bool {
+		return p.build.instances[0].trees.whole != nil && !p.build.instances[0].trees.wholeOut
+	})
+	h.settle()
+	h.click(center(h.labelBounds("Profiles")))
+	h.settle()
+
+	language := h.app.language()
+	toggle := func(choice string) {
+		t.Helper()
+		awaitStateWithin(t, h, 30*time.Second, "tree ready before toggling "+choice, func() bool {
+			return !p.build.optionSaving && !p.build.loading && len(p.build.instances) == 1 &&
+				p.build.instances[0].modelLoaded && !p.build.instances[0].trees.wholeOut
+		})
+		h.settle()
+		label := i18n.SharedFormat(language, "desktop.build.toggleOptionChoice", map[string]string{
+			"option": "Profiles",
+			"choice": choice,
+		})
+		h.clickNamed(label)
+		awaitStateWithin(t, h, 3*time.Minute, "reload after toggling "+choice, func() bool {
+			return !p.build.optionSaving && p.build.loaded && !p.build.loading && !p.build.reloadPending &&
+				len(p.build.instances) == 1 && p.build.instances[0].modelLoaded && !p.build.instances[0].modelLoading
+		})
+	}
+
+	toggle("prod")
+	toggle("dev")
+	instance = &p.build.instances[0]
+	if modelProjectNamed(instance.Model, "prod-mod") == nil || modelProjectNamed(instance.Model, "dev-mod") != nil {
+		t.Fatalf("projects after switching to prod = %+v, want prod-mod only", instance.Model.Projects)
+	}
+
+	output := runBuildTaskToEnd(t, h, p, "", "compile", 5*time.Minute)
+	if !strings.Contains(output, "BUILD SUCCESS") {
+		t.Fatalf("mvn compile printed no success: %q", output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "prod-mod/target/classes/demo/prod/ProdOk.class")); err != nil {
+		t.Fatalf("prod-mod did not compile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dev-mod/target/classes/demo/dev/DevOnly.class")); !os.IsNotExist(err) {
+		t.Fatalf("inactive dev-mod was compiled: %v", err)
+	}
+
+	// Reopening the workspace keeps -P -dev,prod on cold start before decodeModel runs.
+	h.app.closeProject()
+	awaitStateWithin(t, h, 30*time.Second, "the closed project", func() bool { return h.app.project == nil })
+	h.open(root)
+	p = h.app.project
+	h.app.loadBuildSystems(p)
+	reopened := awaitBuildModel(t, h, p, "maven", 3*time.Minute)
+	if modelProjectNamed(reopened.Model, "prod-mod") == nil || modelProjectNamed(reopened.Model, "dev-mod") != nil {
+		t.Fatalf("projects after reopen = %+v, want prod-mod only", reopened.Model.Projects)
 	}
 	h.app.closeProject()
 	awaitStateWithin(t, h, 30*time.Second, "the closed project", func() bool { return h.app.project == nil })

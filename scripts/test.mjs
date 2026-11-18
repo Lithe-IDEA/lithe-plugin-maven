@@ -241,6 +241,130 @@ async function test(signal) {
 
     await check("profiles become choices of the Profiles option", () => {
       assert.deepEqual(model.optionValues.profiles, ["ci", "release"]);
+      assert.equal(model.optionDefaults, undefined);
+      assert.deepEqual(model.optionActiveChoices, { profiles: [] });
+      assert.deepEqual(model.optionExcludePrefixes, { profiles: "-" });
+    });
+
+    const profileRoot = join(scratch, "profiles-reactor");
+    const emptySettings = join(scratch, "profile-empty-settings.xml");
+    writeFileSync(emptySettings, "<settings/>");
+    const readProfileModel = async (tag, profileArg, settings = emptySettings) => {
+      const outputFile = join(outputs, `profiles-${tag}.json`);
+      const extra = profileArg ? ["-P", profileArg] : [];
+      const argv = [
+        ...expand(buildSystem.invocation.globalArguments, { outputFile }),
+        "-gs", emptySettings, "-s", settings,
+        ...extra,
+        ...expand(buildSystem.model.arguments, { outputFile }),
+      ];
+      await runCommand(maven, argv, {
+        cwd: profileRoot, env: { ...process.env, MAVEN_ARGS: "" },
+        stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+      });
+      return JSON.parse(readFileSync(outputFile, "utf8"));
+    };
+
+    await check("default-active profiles stay reported across -P switches and deactivations", async () => {
+      mkdirSync(join(profileRoot, "dev-module"), { recursive: true });
+      mkdirSync(join(profileRoot, "prod-module"), { recursive: true });
+      writeFileSync(join(profileRoot, "pom.xml"), [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>demo</groupId>",
+        "  <artifactId>profiles-reactor</artifactId>",
+        "  <version>1.0.0-SNAPSHOT</version>",
+        "  <packaging>pom</packaging>",
+        "  <profiles>",
+        "    <profile>",
+        "      <id>dev</id>",
+        "      <activation><activeByDefault>true</activeByDefault></activation>",
+        "      <modules><module>dev-module</module></modules>",
+        "    </profile>",
+        "    <profile>",
+        "      <id>prod</id>",
+        "      <modules><module>prod-module</module></modules>",
+        "    </profile>",
+        "  </profiles>",
+        "</project>",
+      ].join("\n"));
+      for (const name of ["dev-module", "prod-module"]) {
+        writeFileSync(join(profileRoot, name, "pom.xml"), [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+          "  <modelVersion>4.0.0</modelVersion>",
+          "  <parent><groupId>demo</groupId><artifactId>profiles-reactor</artifactId><version>1.0.0-SNAPSHOT</version></parent>",
+          `  <artifactId>${name}</artifactId>`,
+          "</project>",
+        ].join("\n"));
+      }
+      const initial = await readProfileModel("default", "");
+      assert.deepEqual(initial.optionValues.profiles, ["dev", "prod"]);
+      assert.deepEqual(initial.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(initial.optionActiveChoices, { profiles: ["dev"] });
+      assert.deepEqual(initial.optionExcludePrefixes, { profiles: "-" });
+      assert.deepEqual(initial.projects.map((project) => project.name), ["profiles-reactor", "dev-module"]);
+
+      const switched = await readProfileModel("switched", "-dev,prod");
+      assert.deepEqual(switched.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(switched.optionActiveChoices, { profiles: ["prod"] });
+      assert.deepEqual(switched.projects.map((project) => project.name), ["profiles-reactor", "prod-module"]);
+
+      const cleared = await readProfileModel("cleared", "-dev");
+      assert.deepEqual(cleared.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(cleared.optionActiveChoices, { profiles: [] });
+      assert.deepEqual(cleared.projects.map((project) => project.name), ["profiles-reactor"]);
+
+      const settings = join(profileRoot, "settings.xml");
+      writeFileSync(settings, "<settings><activeProfiles><activeProfile>dev</activeProfile></activeProfiles></settings>");
+      const fromBothSources = await readProfileModel("settings-and-cli", "prod", settings);
+      assert.deepEqual(fromBothSources.optionActiveChoices, { profiles: ["dev", "prod"] });
+      assert.deepEqual(fromBothSources.projects.map((project) => project.name),
+        ["profiles-reactor", "dev-module", "prod-module"]);
+    });
+
+    await check("packaging activation is reflected in baseline defaults and can be disabled", async () => {
+      const pom = join(profileRoot, "pom.xml");
+      const original = readFileSync(pom, "utf8");
+      writeFileSync(pom, original.replace("<activeByDefault>true</activeByDefault>",
+        "<property><name>packaging</name><value>pom</value></property>"));
+      try {
+        const baseline = await readProfileModel("packaging", "");
+        const active = baseline.projects.some((project) => project.name === "dev-module") ? ["dev"] : [];
+        assert.deepEqual(baseline.optionDefaults?.profiles ?? [], active);
+        assert.deepEqual(baseline.optionActiveChoices?.profiles, active);
+        const disabled = await readProfileModel("packaging-disabled", "-dev");
+        assert.deepEqual(disabled.optionDefaults?.profiles ?? [], active);
+        assert.deepEqual(disabled.optionActiveChoices?.profiles, []);
+        assert.equal(disabled.projects.some((project) => project.name === "dev-module"), false);
+
+        // A parent Profile evaluates packaging in the child's model context.
+        writeFileSync(pom, original
+          .replace("<profiles>", "<modules><module>prod-module</module></modules><profiles>")
+          .replace("<activeByDefault>true</activeByDefault>",
+            "<property><name>packaging</name><value>jar</value></property>")
+          .replace("<modules><module>dev-module</module></modules>", ""));
+        const inherited = await readProfileModel("packaging-parent", "");
+        assert.deepEqual(inherited.optionDefaults?.profiles ?? [], active);
+        assert.deepEqual(inherited.optionActiveChoices?.profiles, active);
+      } finally {
+        writeFileSync(pom, original);
+      }
+    });
+
+    await check("project Maven config keeps its active and inactive profiles in the baseline", async () => {
+      mkdirSync(join(profileRoot, ".mvn"));
+      writeFileSync(join(profileRoot, ".mvn", "maven.config"), "--activate-profiles\n+prod\n-P\n!dev\n");
+      const baseline = await readProfileModel("project-config", "");
+      assert.deepEqual(baseline.optionDefaults?.profiles, ["prod"]);
+      assert.deepEqual(baseline.optionActiveChoices?.profiles, ["prod"]);
+      assert.deepEqual(baseline.projects.map((project) => project.name), ["profiles-reactor", "prod-module"]);
+
+      const cleared = await readProfileModel("project-config-disabled", "-prod");
+      assert.deepEqual(cleared.optionDefaults?.profiles, ["prod"]);
+      assert.deepEqual(cleared.optionActiveChoices?.profiles, []);
+      assert.deepEqual(cleared.projects.map((project) => project.name), ["profiles-reactor"]);
     });
 
     await check("plugin goals are model tasks filed under Plugins", () => {

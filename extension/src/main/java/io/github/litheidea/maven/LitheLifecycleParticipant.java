@@ -11,9 +11,12 @@ import javax.inject.Singleton;
 import org.apache.maven.AbstractMavenLifecycleParticipant;
 import org.apache.maven.MavenExecutionException;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.profile.ProfileSelector;
 import org.apache.maven.plugin.MavenPluginManager;
 import org.apache.maven.plugin.version.PluginVersionResolver;
 import org.apache.maven.project.ProjectDependenciesResolver;
+import org.apache.maven.rtinfo.RuntimeInformation;
+import org.apache.maven.settings.building.SettingsBuilder;
 
 /**
  * Writes what Lithe asked for once Maven has read the reactor, before any
@@ -42,22 +45,32 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     private final MavenPluginManager pluginManager;
     private final PluginVersionResolver versionResolver;
     private final ProjectDependenciesResolver dependenciesResolver;
+    private final ProfileSelector profileSelector;
+    private final SettingsBuilder settingsBuilder;
+    private final RuntimeInformation runtime;
 
     @Inject
     public LitheLifecycleParticipant(
             MavenPluginManager pluginManager,
             PluginVersionResolver versionResolver,
-            ProjectDependenciesResolver dependenciesResolver) {
+            ProjectDependenciesResolver dependenciesResolver,
+            ProfileSelector profileSelector,
+            SettingsBuilder settingsBuilder,
+            RuntimeInformation runtime) {
         this.pluginManager = pluginManager;
         this.versionResolver = versionResolver;
         this.dependenciesResolver = dependenciesResolver;
+        this.profileSelector = profileSelector;
+        this.settingsBuilder = settingsBuilder;
+        this.runtime = runtime;
     }
 
     @Override
     public void afterProjectsRead(MavenSession session) throws MavenExecutionException {
         String modelOutput = property(session, MODEL_OUTPUT);
         if (modelOutput != null) {
-            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver).document()));
+            write(modelOutput, Json.write(new ModelExport(session, pluginManager, versionResolver,
+                    profileSelector, settingsBuilder, runtime.isMavenVersion("[3.9.0,)")).document()));
         }
         String dependenciesOutput = property(session, DEPENDENCIES_OUTPUT);
         if (dependenciesOutput != null) {

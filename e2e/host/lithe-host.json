@@ -1,9 +1,18 @@
 {
   "repository": "https://github.com/1lck/Lithe-IDEA.git",
-  "revision": "1ce4085e7012a8b9e887c5bab734ef3fd561a7f8",
+  "revision": "6f319840219a5788ca897ec01a378184efea3471",
   "packages": {
-    "./internal/workbench": "^TestOfficialMavenPlugin(BuildsAReactor|RunsASpringBootApplication|DebugsASpringBootApplication)$",
+    "./internal/workbench": "^TestOfficialMavenPlugin(BuildsAReactor|RunsASpringBootApplication|DebugsASpringBootApplication|SwitchesActiveProfilesInBuildTree)$",
     "./internal/projectgen": "^TestMavenPlugin"
+  },
+  "suites": {
+    "profiles": {
+      "hostBuildProviders": [0],
+      "packages": {
+        "./internal/workbench": "^TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree$"
+      },
+      "requiredEnvironment": ["LITHE_TEST_MAVEN_PLUGIN_ARCHIVE"]
+    }
   },
   "requiredEnvironment": {
     "LITHE_TEST_MAVEN_PLUGIN_ARCHIVE": "maven-build-<version>-darwin.zip to install, for example dist/maven-build-0.0.1-darwin.zip",
