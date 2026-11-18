@@ -409,6 +409,10 @@ final class RunPreparation {
                     }
                 }
             }
+            // An entrypoint run names no target; progress and errors name the class instead.
+            if (request.targetName.isEmpty() && request.entrypoint != null) {
+                request.targetName = request.entrypoint.substring(request.entrypoint.lastIndexOf('.') + 1);
+            }
             return request;
         }
     }

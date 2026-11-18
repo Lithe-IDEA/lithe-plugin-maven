@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "1.0.0",
   "pluginAPIVersion": 0,
-  "requires": {"buildSystems": 0, "buildProviders": 0, "projectGenerators": 0, "settings": 0, "backend": 0, "sourceSettings": 0},
+  "requires": {"buildSystems": 0, "buildProviders": 1, "projectGenerators": 0, "settings": 0, "backend": 0, "sourceSettings": 0},
   "vendor": {"id": "io.github.lithe-idea", "displayName": "Lithe Community", "signatureRequirement": "none"},
   "permissions": ["process.build", "project.generate", "backend.launch", "languageServer.launch", "workspace.metadata"],
   "activationEvents": ["onBuildSystem:maven"],
@@ -331,7 +331,8 @@
       },
       "run": [
         {"id": "spring-boot", "source": "provider", "fromTargets": {"tags": ["spring-boot"]}, "execution": "service", "debug": {"configurationType": "java"}},
-        {"id": "application", "source": "provider", "fromTargets": {"tags": ["java-application"]}, "execution": "application"}
+        {"id": "application", "source": "provider", "fromTargets": {"tags": ["java-application"]}, "execution": "application"},
+        {"id": "main", "source": "provider", "entrypoints": true}
       ]
     }
   ],

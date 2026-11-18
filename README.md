@@ -25,7 +25,7 @@
 | 彩色输出 | 每条 Maven 命令都带 `-Dstyle.color=always`，即使输出不是终端也保留 Maven 的颜色；Lithe 的构建、运行和测试控制台按颜色显示 `[INFO]`、`[WARNING]`、`[ERROR]` 和 `BUILD SUCCESS`，匹配诊断前会先去掉颜色转义 |
 | 依赖 | 显示整个反应堆或单个模块的依赖树（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析 |
 | 同步 | `pom.xml`、`.mvn/maven.config`、`.mvn/extensions.xml` 变化后重新读取项目 |
-| 运行配置 | Spring Boot 应用和写明主类的 Java 应用自动出现在标题栏的运行配置里，可以运行和编辑参数，见下面的「运行应用」 |
+| 运行配置 | Spring Boot 应用和写明主类的 Java 应用自动出现在标题栏的运行配置里；其他带 main 方法的类选“当前文件”即可运行并保存为配置。都可以运行和编辑参数，见下面的「运行应用」 |
 
 ## 设置和构建选项
 
@@ -101,6 +101,11 @@ brew install maven
 | --- | --- | --- |
 | `spring-boot` | 源码根里带 `@SpringBootApplication` 的类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务 |
 | `application` | `exec-maven-plugin` 的 `mainClass` 或 jar 清单 `archive/manifest/mainClass` 写明主类的模块 | 应用 |
+| `main` | 入口运行（`entrypoints: true`）：标题栏选“当前文件”点运行时，提供者回答当前文件里带 `static void main(String[])` 的类，Lithe 把它存成以类名命名的运行配置后运行；POM 里不用写主类 | 应用 |
+
+“当前文件”的入口（`lithe/build/runEntrypoints`）只读这一个文件：模块是文件上方最近一个有 `pom.xml` 的目录，类名是包名加文件名，
+测试源码（`src/test/`）不算，因为运行用的运行时类路径里没有测试类。这项需要支持 `buildProviders` 1 的 Lithe 桌面端
+（[1lck/Lithe-IDEA#2104](https://github.com/1lck/Lithe-IDEA/issues/2104)）。
 
 列 target 只读源码开头和 POM，不编译。运行时 Lithe 启动随包的构建提供者 `lib/lithe-maven-provider.jar`
 （源码在 `provider/`），由它准备运行：

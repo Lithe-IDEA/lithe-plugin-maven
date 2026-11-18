@@ -1,5 +1,5 @@
 // Talks to lib/lithe-maven-settings.jar the way Lithe does: LSP base-protocol
-// frames over the process's stdio, `initialize` offering litheBuild 1, then
+// frames over the process's stdio, `initialize` offering litheBuild 0 and 1, then
 // lithe/build/* requests. Every wait is bounded, and the backend runs in its
 // own process group so a test can always end whatever it left behind.
 import { execFileSync, spawn } from "node:child_process";
@@ -80,7 +80,7 @@ export class BackendClient {
       processId: process.pid,
       rootUri: pathToFileURL(root).href,
       capabilities: { experimental: {
-        ...(functions ? { litheFunctions: { versions: [0] } } : { litheBuild: { versions: [0] } }),
+        ...(functions ? { litheFunctions: { versions: [0] } } : { litheBuild: { versions: [0, 1] } }),
         litheLogging: { versions: [0] },
       } },
     });
