@@ -2,6 +2,7 @@ package io.github.litheidea.maven;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -11,6 +12,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
+import org.apache.commons.cli.ParseException;
 import org.apache.maven.MavenExecutionException;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Plugin;
@@ -28,7 +30,6 @@ import org.apache.maven.plugin.version.DefaultPluginVersionRequest;
 import org.apache.maven.plugin.version.PluginVersionResolver;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.settings.Settings;
-import org.apache.maven.settings.SettingsUtils;
 import org.apache.maven.settings.building.DefaultSettingsBuildingRequest;
 import org.apache.maven.settings.building.SettingsBuilder;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ final class ModelExport {
     private final PluginVersionResolver versionResolver;
     private final ProfileSelector profileSelector;
     private final SettingsBuilder settingsBuilder;
+    private final boolean maven39OrLater;
     /** Goals by plugin coordinates, so each descriptor is read once per run. */
     private final Map<String, Goals> goalsByPlugin = new LinkedHashMap<>();
 
@@ -63,12 +65,14 @@ final class ModelExport {
             MavenPluginManager pluginManager,
             PluginVersionResolver versionResolver,
             ProfileSelector profileSelector,
-            SettingsBuilder settingsBuilder) {
+            SettingsBuilder settingsBuilder,
+            boolean maven39OrLater) {
         this.session = session;
         this.pluginManager = pluginManager;
         this.versionResolver = versionResolver;
         this.profileSelector = profileSelector;
         this.settingsBuilder = settingsBuilder;
+        this.maven39OrLater = maven39OrLater;
     }
 
     Map<String, Object> document() {
@@ -130,6 +134,8 @@ final class ModelExport {
             document.put("optionDefaults", optionDefaults);
         }
         document.put("optionExcludePrefixes", optionExcludePrefixes);
+        document.put("optionActiveChoices",
+                Collections.singletonMap("profiles", new ArrayList<>(activeProfileIds(profiles))));
         return document;
     }
 
@@ -331,8 +337,23 @@ final class ModelExport {
         return ids;
     }
 
+    /** Profiles Maven actually applied when it built this reactor model. */
+    private Set<String> activeProfileIds(Set<String> knownProfiles) {
+        Set<String> active = new TreeSet<>();
+        for (MavenProject project : session.getProjects()) {
+            // The build result records parent profiles evaluated in this project's context.
+            for (List<String> ids : project.getInjectedProfileIds().values()) {
+                for (String id : ids) {
+                    addKnownProfile(active, knownProfiles, id);
+                }
+            }
+        }
+        return active;
+    }
+
     /**
-     * Profiles Maven activates when no {@code -P} argument is passed:
+     * Profiles Maven activates before the IDE applies a selection. Project CLI
+     * configuration remains part of this baseline, along with
      * {@code <activeByDefault>}, {@code settings.xml}
      * {@code <activeProfiles>}, and condition-activated ({@code <jdk>},
      * {@code <os>}, {@code <property>}, {@code <file>}) profiles evaluated by
@@ -342,51 +363,49 @@ final class ModelExport {
         Set<String> defaults = new TreeSet<>();
         Properties userProperties = cleanUserProperties();
         Settings effectiveSettings = effectiveSettings(userProperties);
-        List<String> settingsActive = effectiveSettings != null && effectiveSettings.getActiveProfiles() != null
-                ? new ArrayList<>(effectiveSettings.getActiveProfiles())
-                : Collections.<String>emptyList();
-        for (String id : settingsActive) {
-            addDefaultProfile(defaults, knownProfiles, id);
-        }
-        if (profileSelector == null) {
+        List<String> activeIds = effectiveSettings == null
+                ? new ArrayList<>() : new ArrayList<>(effectiveSettings.getActiveProfiles());
+        List<String> inactiveIds = new ArrayList<>();
+        try {
+            MavenConfigProfiles.read(session.getRequest().getMultiModuleProjectDirectory(),
+                    maven39OrLater, activeIds, inactiveIds);
+        } catch (IOException | ParseException error) {
+            LOG.warn("Lithe could not read Maven project profile defaults ({})", error.getClass().getSimpleName());
             return defaults;
         }
+        List<Profile> settingsProfiles = session.getRequest().getProfiles();
         ModelProblemCollector problems = new ModelProblemCollector() {
             @Override
             public void add(ModelProblemCollectorRequest request) {}
         };
         for (MavenProject project : session.getProjects()) {
+            Properties projectUserProperties = new Properties();
+            projectUserProperties.putAll(userProperties);
+            if (maven39OrLater && project.getOriginalModel() != null) {
+                // Maven evaluates the whole parent lineage in the starting POM's packaging context.
+                projectUserProperties.putIfAbsent("packaging", project.getOriginalModel().getPackaging());
+            }
+            DefaultProfileActivationContext context = new DefaultProfileActivationContext()
+                    .setActiveProfileIds(activeIds)
+                    .setInactiveProfileIds(inactiveIds)
+                    .setSystemProperties(session.getSystemProperties())
+                    .setUserProperties(projectUserProperties)
+                    .setProjectDirectory(project.getBasedir());
+            Properties externalProperties = new Properties();
+            for (Profile active : profileSelector.getActiveProfiles(settingsProfiles, context, problems)) {
+                addKnownProfile(defaults, knownProfiles, active.getId());
+                externalProperties.putAll(active.getProperties());
+            }
+            externalProperties.putAll(projectUserProperties);
+            context.setUserProperties(externalProperties);
             for (MavenProject current = project; current != null; current = current.getParent()) {
                 if (current.getOriginalModel() == null || current.getOriginalModel().getProfiles().isEmpty()) {
                     continue;
                 }
-                DefaultProfileActivationContext context = new DefaultProfileActivationContext()
-                        .setActiveProfileIds(settingsActive)
-                        .setInactiveProfileIds(Collections.<String>emptyList())
-                        .setSystemProperties(session.getSystemProperties())
-                        .setUserProperties(userProperties)
-                        .setProjectDirectory(current.getBasedir())
-                        .setProjectProperties(current.getOriginalModel().getProperties());
+                context.setProjectProperties(current.getOriginalModel().getProperties());
                 for (Profile active : profileSelector.getActiveProfiles(current.getOriginalModel().getProfiles(), context, problems)) {
-                    addDefaultProfile(defaults, knownProfiles, active.getId());
+                    addKnownProfile(defaults, knownProfiles, active.getId());
                 }
-            }
-        }
-        List<org.apache.maven.settings.Profile> rawSettingsProfiles = effectiveSettings != null
-                ? effectiveSettings.getProfiles()
-                : (session.getSettings() != null ? session.getSettings().getProfiles() : Collections.<org.apache.maven.settings.Profile>emptyList());
-        if (!rawSettingsProfiles.isEmpty()) {
-            List<Profile> settingsProfiles = new ArrayList<>();
-            for (org.apache.maven.settings.Profile profile : rawSettingsProfiles) {
-                settingsProfiles.add(SettingsUtils.convertFromSettingsProfile(profile));
-            }
-            DefaultProfileActivationContext context = new DefaultProfileActivationContext()
-                    .setActiveProfileIds(settingsActive)
-                    .setInactiveProfileIds(Collections.<String>emptyList())
-                    .setSystemProperties(session.getSystemProperties())
-                    .setUserProperties(userProperties);
-            for (Profile active : profileSelector.getActiveProfiles(settingsProfiles, context, problems)) {
-                addDefaultProfile(defaults, knownProfiles, active.getId());
             }
         }
         return defaults;
@@ -427,7 +446,7 @@ final class ModelExport {
         return cleaned;
     }
 
-    private static void addDefaultProfile(Set<String> defaults, Set<String> knownProfiles, String id) {
+    private static void addKnownProfile(Set<String> defaults, Set<String> knownProfiles, String id) {
         if (id == null) {
             return;
         }

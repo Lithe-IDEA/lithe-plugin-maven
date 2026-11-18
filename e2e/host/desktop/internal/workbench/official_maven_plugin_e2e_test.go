@@ -175,7 +175,7 @@ func runBuildTaskToEnd(t *testing.T, h *harness, p *project, projectID, taskID s
 	}
 	awaitStateWithin(t, h, limit, "the "+taskID+" task", func() bool { return p.build.operation == nil })
 	output := op.session.output.all()
-	if p.build.status != h.app.text.Build.Succeeded {
+	if op.session.outcome != runSucceeded {
 		t.Fatalf("%s did not succeed: status=%q output=%q", taskID, p.build.status, output)
 	}
 	return output
@@ -335,7 +335,7 @@ func TestOfficialMavenPluginBuildsAReactor(t *testing.T) {
 }
 
 // TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree installs the Maven Build archive,
-// verifies <activeByDefault> profiles show checked in the Build tool window's Profiles node,
+// verifies a Profile enabled by .mvn/maven.config appears checked in the Build tool window,
 // toggles from dev to prod through the real checkbox UI, and checks that model reload,
 // compile and project reopen all honor -P -dev,prod.
 func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
@@ -360,12 +360,13 @@ func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
 			"  <groupId>demo</groupId><artifactId>reactor</artifactId><version>1.0.0-SNAPSHOT</version><packaging>pom</packaging>\n" +
 			"  <properties><maven.compiler.release>11</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>\n" +
 			"  <profiles>\n" +
-			"    <profile><id>dev</id><activation><activeByDefault>true</activeByDefault></activation><modules><module>dev-mod</module></modules></profile>\n" +
+			"    <profile><id>dev</id><modules><module>dev-mod</module></modules></profile>\n" +
 			"    <profile><id>prod</id><modules><module>prod-mod</module></modules></profile>\n" +
 			"  </profiles>\n</project>\n",
-		"dev-mod/pom.xml":                              modulePom("dev-mod"),
-		"dev-mod/src/main/java/demo/dev/DevOnly.java":  "package demo.dev;\npublic final class DevOnly {}\n",
-		"prod-mod/pom.xml":                             modulePom("prod-mod"),
+		".mvn/maven.config": "-Pdev\n",
+		"dev-mod/pom.xml":   modulePom("dev-mod"),
+		"dev-mod/src/main/java/demo/dev/DevOnly.java": "package demo.dev;\npublic final class DevOnly {}\n",
+		"prod-mod/pom.xml": modulePom("prod-mod"),
 		"prod-mod/src/main/java/demo/prod/ProdOk.java": "package demo.prod;\npublic final class ProdOk {}\n",
 	})
 	h.open(root)
@@ -376,7 +377,7 @@ func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
 	h.app.reduceChrome(core.ToggleChrome(itemBuild))
 	instance := awaitBuildModel(t, h, p, "maven", 3*time.Minute)
 	if modelProjectNamed(instance.Model, "dev-mod") == nil || modelProjectNamed(instance.Model, "prod-mod") != nil {
-		t.Fatalf("initial projects = %+v, want dev-mod active by default", instance.Model.Projects)
+		t.Fatalf("initial projects = %+v, want the project config to activate dev-mod", instance.Model.Projects)
 	}
 
 	awaitStateWithin(t, h, 30*time.Second, "the Build tree layout", func() bool {

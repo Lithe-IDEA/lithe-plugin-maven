@@ -63,15 +63,17 @@ JDT 侧的项目导入归 Java Support 插件维护。
 ## java-maven-profiles-dependencies
 
 **能力**：构建选项 Profiles 传 `-P <profile>`，候选值从反应堆、父 POM 和 `settings.xml` 读取，也可以手动补充；
-随包 Maven 扩展用 Maven 自身的 `ProfileSelector` 计算无 `-P` 时的默认激活 Profile（`<activeByDefault>`、`settings.xml` `<activeProfiles>` 与条件激活）写入 `optionDefaults.profiles`，并输出 `optionExcludePrefixes.profiles = "-"`，支持在 Build 工具窗口树、构建选项和运行配置里勾选启用或以 `-<profile>` 显式取消默认激活 Profile；
+随包 Maven 扩展用 Maven 自身的 `ProfileSelector` 计算应用 Lithe 覆盖前的默认 Profile（含 `.mvn/maven.config` 中的启用和禁用、`settings.xml`、条件激活以及 Maven 3.9 的 `packaging` 条件）写入 `optionDefaults.profiles`。当前反应堆实际激活的 Profile 由 Maven 项目模型提供，写入 `optionActiveChoices.profiles`，包括 `settings.xml` 和命令行同时激活的选项。扩展还输出 `optionExcludePrefixes.profiles = "-"`，支持在 Build 工具窗口树、构建选项和运行配置里勾选启用或以 `-<profile>` 显式取消默认激活 Profile；
 依赖树显示整个反应堆或单个模块的依赖（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析。
 
 **证据**：`plugin.json` 的 `buildSystems[0].options`（`profiles`）和 `buildSystems[0].dependencies`、`extension/`（`ModelExport.java`）、
 `scripts/test.mjs`、宿主端到端测试里 `app` 模块依赖 `core` 的检查。
 
-**依赖的宿主能力**：`buildSystems` 的构建选项（含 `optionDefaults`、`optionExcludePrefixes` 与 `presentation: "tree"` 勾选树节点）、依赖命令和 `litheDependencies` 解码。
+**自动化**：`node scripts/test.mjs` 在 Maven 3.6.3 和运行器版本验证原生 Profile 语义。宿主能力版本匹配时，CI 另用 `node scripts/e2e-host.mjs --suite profiles` 验证构建树、编译和重开。
 
-**最近验证**：2026-11-18，macOS arm64，插件 1.0.0 打包产物，`node scripts/test.mjs` 验证了反应堆 `optionValues.profiles`、`optionDefaults.profiles`（`<activeByDefault>`）与 `optionExcludePrefixes.profiles = "-"` 的导出，以及通过 `-P -dev,prod` 切换激活模块和 `-P -dev` 取消全部默认 Profile 后模型按新 Profile 重读且 `optionDefaults` 保持不变；2026-11-14 宿主端到端测试 `TestOfficialMavenPluginBuildsAReactor` 检查了 `app` 对反应堆兄弟模块 `core` 的依赖。完整原生 UI 手工验收与大依赖树仍待执行。
+**依赖的宿主能力**：`buildSystems` 的构建选项（含 `optionDefaults`、`optionActiveChoices`、`optionExcludePrefixes` 与 `presentation: "tree"` 勾选树节点）、依赖命令和 `litheDependencies` 解码。
+
+**最近验证**：2026-11-18，macOS arm64，插件 1.0.0 打包产物，`node scripts/test.mjs` 验证了反应堆 `optionValues.profiles`、`optionDefaults.profiles`（`<activeByDefault>`）与 `optionExcludePrefixes.profiles = "-"` 的导出，以及通过 `-P -dev,prod` 切换激活模块和 `-P -dev` 取消全部默认 Profile 后模型按新 Profile 重读且 `optionDefaults` 保持不变。Maven 3.6.3 和 3.9.16 验证了项目配置与打包类型激活基线。Maven 3.9.16 还验证了当前激活集合随这两次切换分别变为 `["prod"]` 和 `[]`，以及 `settings.xml` 激活 `dev` 与命令行选择 `prod` 可以同时生效。固定宿主 `6f31984` 上的 `TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree` 验证项目 Maven 配置的勾选、切换、编译、重开及已安装插件包内容校验；2026-11-14 宿主端到端测试 `TestOfficialMavenPluginBuildsAReactor` 检查了 `app` 对反应堆兄弟模块 `core` 的依赖。完整原生 UI 手工验收与大依赖树仍待执行。
 
 **验证方法**（macOS）：
 

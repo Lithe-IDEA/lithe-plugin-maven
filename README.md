@@ -203,6 +203,8 @@ node scripts/verify-scripts.mjs --host-bundle /Applications/Lithe.app
   打开一个真实的两模块 Spring Boot 3.5 项目（`spring-boot-starter-web`），确认运行配置下拉只列出 `ShopApplication`（服务），
   用运行配置编辑器保存 JVM 参数、程序参数和环境变量，运行后检查控制台里的 Maven 构建日志和 Spring Boot 启动日志，
   请求 `/hello` 确认三项设置都传到了进程；停止后确认服务不再响应、端口已释放，插件安装目录没有被写入。
+- `TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree`（`desktop/internal/workbench` 包）：在构建树切换 Profile，
+  编译后检查模块产物，重开项目确认保存的选择仍然有效。
 - `TestMavenPluginProjectGeneratesABuildableMavenProject`、`TestMavenPluginArchetypeRunsRealMaven`（`desktop/internal/projectgen` 包）：
   用清单里的两个新建项目条目生成项目。
 
@@ -219,14 +221,17 @@ LITHE_TEST_JAVA_PLUGIN_ARCHIVE="$PWD/.artifacts/java-plugin/Lithe-Java-Support-<
 node scripts/e2e-host.mjs
 ```
 
-- `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE` 和 `LITHE_TEST_JAVA_PLUGIN_ARCHIVE` 都必须设置，脚本不会因为缺少插件包而跳过测试。
+- 全量宿主端到端测试需要 `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE` 和 `LITHE_TEST_JAVA_PLUGIN_ARCHIVE`。
   运行计划用 `java` 工具启动应用，这个工具由 Java Support 插件定义，所以运行测试要装上它。
 - 运行测试使用本机 `~/.m2` 和 Maven 设置，第一次运行会下载 Spring Boot 3.5 的依赖，项目需要 JDK 17 及以上。
 - 新建项目测试读取 `LITHE_PLUGIN_MAVEN_DIR` 里的 `plugin.json` 和模板，默认是本仓库的 `io.github.lithe-idea.maven-build/`。
 - 原型测试要从 Maven Central 下载原型插件，只在设置了 `LITHE_INTEGRATION_NETWORK=1` 和 `JAVA_HOME` 时运行，否则跳过。
 
-脚本把固定版本的宿主（只取 `desktop/` 和 `scripts/`）检出到 `.artifacts/lithe-host`，复制 `e2e/host/desktop/` 下的测试，
-再在那里运行宿主的 `scripts/desktop/desktop-go.sh test`；第一次运行会克隆并构建 Rust Core，`LITHE_CORE_RUST_DIR`
+`node scripts/e2e-host.mjs --suite profiles` 只运行 Profile 用例，只需设置 `LITHE_TEST_MAVEN_PLUGIN_ARCHIVE`。
+CI 在固定宿主支持插件所需的 `buildProviders` 版本时，用打包作业的插件包运行此用例。
+
+脚本把固定版本的宿主（只取 `desktop/` 和 `scripts/`）检出到 `.artifacts/lithe-host`，
+通过 Go overlay 加载本仓库的测试，再运行宿主的 `scripts/desktop/desktop-go.sh test`。第一次运行会克隆并构建 Rust Core，`LITHE_CORE_RUST_DIR`
 可以指向本地的 Core 检出。`--ref <分支或 commit>` 换一个宿主版本试跑，`--run <正则>` 只跑部分测试。
 测试用的是宿主内部的测试工具，升级 `lithe-host.json` 的 `revision` 时可能要同步修改测试。
 
