@@ -50,11 +50,20 @@ jobs:
           for tag in $PRERELEASE_TAGS; do
             if [[ "$tag" == "$GITHUB_REF_NAME" ]]; then prerelease=true; fi
           done
+          # docs/releases/<tag>.md carries the release's own compatibility
+          # section. Without it, the requirements come from plugin.json, so the
+          # note never names a host requirement the package does not declare.
           {
-            echo "兼容性：按插件契约 v0（schemaVersion 0、pluginAPIVersion 0）编写，需要支持 sourceSettings 0 的 Lithe 桌面端。请先升级宿主；旧版宿主继续使用原有兼容插件版本。"
-            echo
             if [[ -s "docs/releases/$GITHUB_REF_NAME.md" ]]; then
               cat "docs/releases/$GITHUB_REF_NAME.md"
+              echo
+            else
+              # shellcheck disable=SC2016 # the template literal is JavaScript
+              node -e '
+                const m = require("./io.github.lithe-idea.maven-build/plugin.json");
+                const needs = Object.entries(m.requires || {}).map(([k, v]) => `${k} ${v}`).join("、");
+                console.log(`兼容性：按插件契约 v${m.schemaVersion}（pluginAPIVersion ${m.pluginAPIVersion}）编写，需要支持 ${needs} 的 Lithe 桌面端。请先升级宿主；旧版宿主继续使用原有兼容插件版本。`);
+              '
               echo
             fi
             if [[ "$prerelease" == true ]]; then
