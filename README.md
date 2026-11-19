@@ -39,14 +39,13 @@
 
 | 选项 | 传给 Maven 的内容 |
 | --- | --- |
-| JDK (JAVA_HOME) | 运行 Maven 的 JDK，设为环境变量 `JAVA_HOME` |
 | Profiles | `-P <profile>`；候选值从反应堆、父 POM 和 settings.xml 读取，也可以手动补充 |
 | Settings File | `-s <文件>` |
 | Local Repository | `-Dmaven.repo.local=<目录>` |
 | Offline | `-o`，声明为工具栏开关 |
 | Skip Tests | `-DskipTests`，声明为工具栏开关 |
 
-JDK 是构建选项而不是插件设置，因为契约 v0 的插件设置不能向构建命令注入环境变量。
+编译和启动都用同一个 JDK：设置里工具链的项目 JDK，与 IntelliJ IDEA 的项目 SDK 一致。Lithe 按 `java` 运行时的候选顺序（项目 JDK、`JAVA_HOME`、`PATH` 上的 `java`）解析出 JDK，作为 `JAVA_HOME` 传给 Maven，运行应用时也用它。构建选项里不再单独设置 JDK；从 1.0.1 及更早版本升级后，以前保存的 JDK 选项不再生效，构建选项对话框会列出这项并提供清除。
 
 ## 新建项目
 
