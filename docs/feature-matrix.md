@@ -26,14 +26,15 @@ CI 在 Windows x64 上用 `mvn.cmd` 运行声明的模型、依赖和测试命�
 | --- | --- | --- | --- | --- |
 | `java-maven-project` | 识别 Maven 项目：构建根、模块树、内容根和任务 | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
 | `java-maven-profiles-dependencies` | Profiles 构建选项与依赖树 | implemented / pending | implemented / pending | 2026-11-14 依赖树由宿主端到端测试覆盖（macOS） |
-| `java-maven-project-settings` | Maven 调用设置：Maven 程序和工作区构建选项 | partial / pending | partial / pending | 2026-11-14 Maven executable 由宿主端到端测试覆盖（macOS） |
+| `java-maven-project-settings` | Maven 调用设置：Maven 程序、工作区构建选项、`settingRegions` 搜索关键词与中文翻译 | partial / pending | partial / pending | 2026-11-18 `settingRegions`（`build`、`compiler`）、`settings.mavenExecutable`、`sections.Maven` 通过 Core `9dea6aa` 校验与 `scripts/test.mjs`；2026-11-14 Maven executable 由宿主端到端测试覆盖（macOS） |
 | `java-maven-settings-reach-jdt` | Maven 构建选项作用于 Java 语言服务 | missing / not-applicable | missing / not-applicable | — |
 | `java-maven-toolbar-tooltips` | 构建窗口里的 Maven 图标、工具栏开关和提示 | implemented / pending | implemented / pending | 没有自动化覆盖 |
 | `maven-user-settings-editing` | 编辑用户级 `~/.m2/settings.xml` 的本地仓库 | missing / not-applicable | missing / not-applicable | — |
 | `maven-project-generators` | 新建项目：Maven 和 Maven Archetype | implemented / pending | implemented / pending | 2026-11-14 宿主端到端测试通过（macOS） |
 | `maven-run-applications` | 运行配置：Spring Boot 服务和 Java 应用的运行与调试 | implemented / pending | implemented / pending | 2026-11-17 宿主端到端测试（运行与断点调试）和 `scripts/test.mjs` 通过（macOS）；`scripts/test.mjs` 在 Windows CI 通过 |
+| `maven-task-run-configurations` | 声明式 Maven 任务型运行配置（`Maven`）与启动前任务（`Run Maven Goal` / `运行 Maven 目标`），含中英文翻译 | implemented / pending | implemented / pending | 2026-11-18 通过 Core `9dea6aa`（`runConfig.configurationTypes` / `runConfig.editorForm`）、`scripts/test.mjs` 及宿主 Viva 无头渲染预览（macOS） |
 
-前六条从主仓库迁移；`maven-project-generators` 是本仓库新增，用来记录随测试一起迁来的新建项目测试；`maven-run-applications` 随运行配置一起新增（[1lck/Lithe-IDEA#2074](https://github.com/1lck/Lithe-IDEA/issues/2074)）。
+前六条从主仓库迁移；`maven-project-generators` 是本仓库新增，用来记录随测试一起迁来的新建项目测试；`maven-run-applications` 随运行配置一起新增（[1lck/Lithe-IDEA#2074](https://github.com/1lck/Lithe-IDEA/issues/2074)）；`maven-task-run-configurations` 记录按新版插件 UI 契约新增的声明式 Maven 任务运行配置与启动前任务。
 
 ## java-maven-project
 
@@ -94,12 +95,12 @@ Local Repository、Offline、Skip Tests，按工作区保存，加到构建、�
 | macOS | partial | pending | 构建选项按工作区保存，不能给单个子项目设置不同的 JDK 或选项 |
 | Windows | partial | pending | 同 macOS；Windows 上按 `mvnw.cmd`、`MAVEN_HOME\bin\mvn.cmd`、`PATH` 上的 `mvn`（`mvn.cmd`）的顺序查找 Maven |
 
-**证据**：`plugin.json` 的 `settings`（`mavenExecutable`）、`buildSystems[0].invocation` 和 `buildSystems[0].options`；
+**证据**：`plugin.json` 的 `settings`（`mavenExecutable`）、`settingRegions`（`build`、`compiler`）、`buildSystems[0].invocation` 和 `buildSystems[0].options`，`l10n/zh-Hans.json`（`settings.mavenExecutable`、`sections.Maven`、`settingRegions.build`、`settingRegions.compiler`），以及 `scripts/test.mjs`；
 宿主端到端测试设置 Maven executable 后检查模型重新读取和 `compile` 都运行了设置的 `mvn`。
 
-**依赖的宿主能力**：`settings`（插件设置页和 `reload` 生效方式）、`buildSystems` 的构建选项和可执行文件候选顺序。
+**依赖的宿主能力**：`settings`（插件设置页和 `reload` 生效方式）、`settingRegions`（设置侧栏搜索关键词定位）、`buildSystems` 的构建选项和可执行文件候选顺序。
 
-**最近验证**：2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 设置 Maven executable 为一个包装脚本后，确认模型重新读取和 `compile` 都运行了它。六个构建选项、按工作区保存和 `mvnw` / `MAVEN_HOME` 的候选顺序没有自动化覆盖。
+**最近验证**：2026-11-18，`plugin.json` 与 `l10n/zh-Hans.json` 经 Core `9dea6aa6eaaf830c3568b647aa7daae5018b9727` schema 与 `plugins.settings.catalog` / `plugins.declarative.settingsState` 校验，`scripts/test.mjs` 断言全部通过，并在宿主 Viva 无头设置窗口验证中文分组名与关键词检索。2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 设置 Maven executable 为一个包装脚本后，确认模型重新读取和 `compile` 都运行了它。六个构建选项、按工作区保存和 `mvnw` / `MAVEN_HOME` 的候选顺序没有自动化覆盖。
 
 **验证方法**（macOS）：
 
@@ -238,3 +239,23 @@ Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端�
 4. 同时安装 Java Support，在 Spring Boot 应用里设断点后点调试：断点命中，继续后请求完成，停止后服务结束。
 5. 制造编译错误后运行，看到“Maven 编译失败”的提示，没有启动残缺的应用。
 6. 整个过程中插件安装目录不被写入。
+
+## maven-task-run-configurations
+
+**能力**：声明式 Maven 任务型运行配置类型 `Maven`（`buildSystems[0].runConfigurationTypes`，`execution: "task"`），提供 `Command line` / `命令行`（`goals`）、`Profiles`（`profiles`）、`Skip tests` / `跳过测试`（`skipTests`，`-DskipTests`）、`Work offline` / `离线工作`（`offline`，`-o`）四个表单字段；同时声明启动前任务 `Run Maven Goal` / `运行 Maven 目标`（`beforeLaunchTasks` 中的 `goal`，可添加到任意运行配置的 Before Launch 列表，在工作目录执行指定的 Maven 目标或阶段）。
+
+| 平台 | 实现 | 验证 | 说明 |
+| --- | --- | --- | --- |
+| macOS | implemented | pending | 纯声明式清单与翻译，需宿主声明 `runConfigurationTypes: 0` 与 `beforeLaunchTasks: 0` |
+| Windows | implemented | pending | 与 macOS 使用同一份跨平台声明和翻译，待 Windows 实机验收 |
+
+**证据**：`io.github.lithe-idea.maven-build/plugin.json`（`requires.runConfigurationTypes`、`requires.beforeLaunchTasks`、`buildSystems[0].runConfigurationTypes`、`buildSystems[0].beforeLaunchTasks`）、`io.github.lithe-idea.maven-build/l10n/zh-Hans.json`（`runConfigurationTypes.maven.maven`、`beforeLaunchTasks.maven.goal`）、`scripts/test.mjs`。
+
+**依赖的宿主能力**：`runConfigurationTypes: 0`、`beforeLaunchTasks: 0`。
+
+**最近验证**：2026-11-18，macOS arm64：通过 Core `9dea6aa6eaaf830c3568b647aa7daae5018b9727` JSON Schema 校验以及 `runConfig.configurationTypes` / `runConfig.editorForm` 语义校验（`applied: "l10n/zh-Hans.json"`、`rejected: []`）；`node scripts/test.mjs` 通过清单与中文翻译结构断言；宿主 Viva 无头运行配置编辑窗口与 Before Launch 弹窗渲染通过。真实点击运行配置执行 Maven 任务的端到端宿主 UI 交互仍待手工验收。
+
+**验证方法**（macOS）：
+
+1. 在运行配置编辑器中新建 `Maven` 配置，分别测试输入 `goals`、`profiles`、`skipTests`、`offline` 并保存与运行，确认拼接的 `mvn` 参数准确无误。
+2. 在其他运行配置（如 Spring Boot）的“启动前（Before Launch）”列表添加“运行 Maven 目标”，确认启动主进程前先执行指定 Maven 目标且中文标题与说明显示完整。

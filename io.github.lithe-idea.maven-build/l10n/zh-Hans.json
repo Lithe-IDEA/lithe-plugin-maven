@@ -1,4 +1,15 @@
 {
+  "$schema": "https://raw.githubusercontent.com/Lithe-IDEA/Lithe-core-rust/main/shared/plugins/contract/v1/plugin-l10n.schema.json",
+  "settings": {
+    "mavenExecutable": {
+      "title": "Maven 程序",
+      "description": "要运行的 mvn 程序。留空时依次使用项目的 Maven Wrapper（mvnw）、MAVEN_HOME 和 PATH 中的 mvn；填写后总是使用指定路径，即使项目带有 Wrapper。",
+      "placeholder": "自动：mvnw、MAVEN_HOME、PATH"
+    }
+  },
+  "sections": {
+    "Maven": "Maven"
+  },
   "settingActions": {
     "compiler": {
       "title": "使用项目工具读取编译设置",
@@ -7,6 +18,70 @@
     "libraries": {
       "title": "读取本地 JAR 依赖",
       "description": "读取项目实际引用的 JAR；保存时更新页面列出的原生配置文件。读取可能执行项目代码并下载依赖。"
+    }
+  },
+  "settingRegions": {
+    "build": {
+      "keywords": [
+        "Maven 程序",
+        "构建选项",
+        "本地仓库",
+        "配置文件",
+        "依赖",
+        "包装器"
+      ]
+    },
+    "compiler": {
+      "keywords": [
+        "Maven 编译器",
+        "编译插件",
+        "源代码版本",
+        "目标版本",
+        "编码"
+      ]
+    }
+  },
+  "runConfigurationTypes": {
+    "maven": {
+      "maven": {
+        "displayName": "Maven",
+        "description": "用 mvn 运行 Maven 目标、生命周期阶段和选项。",
+        "fields": {
+          "goals": {
+            "title": "命令行",
+            "description": "要运行的 Maven 目标、阶段和选项，例如 clean package 或 test -Dtest=MyTest。",
+            "placeholder": "clean package"
+          },
+          "profiles": {
+            "title": "Profiles",
+            "description": "逗号分隔的 Maven Profile 列表；以 ! 或 - 开头表示取消激活，作为 -P 传入。",
+            "placeholder": "dev, -integration"
+          },
+          "skipTests": {
+            "title": "跳过测试",
+            "description": "传入 -DskipTests，编译测试源码但不运行测试。"
+          },
+          "offline": {
+            "title": "离线工作",
+            "description": "传入 -o，只从本地仓库解析依赖。"
+          }
+        }
+      }
+    }
+  },
+  "beforeLaunchTasks": {
+    "maven": {
+      "goal": {
+        "displayName": "运行 Maven 目标",
+        "description": "启动前在运行配置的工作目录里运行 Maven 目标或阶段，例如 compile 或 test-compile。",
+        "fields": {
+          "goals": {
+            "title": "命令行",
+            "description": "启动前要运行的 Maven 目标、阶段和选项，例如 compile 或 package -DskipTests。",
+            "placeholder": "compile"
+          }
+        }
+      }
     }
   }
 }

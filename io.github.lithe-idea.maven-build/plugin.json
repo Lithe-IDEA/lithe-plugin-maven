@@ -4,7 +4,7 @@
   "displayName": "Maven",
   "version": "1.0.1",
   "pluginAPIVersion": 0,
-  "requires": {"buildSystems": 0, "buildProviders": 1, "projectGenerators": 0, "settings": 0, "backend": 0, "sourceSettings": 0},
+  "requires": {"buildSystems": 0, "buildProviders": 1, "projectGenerators": 0, "runConfigurationTypes": 0, "beforeLaunchTasks": 0, "settings": 0, "backend": 0, "sourceSettings": 0},
   "vendor": {"id": "io.github.lithe-idea", "displayName": "Lithe Community", "signatureRequirement": "none"},
   "permissions": ["process.build", "project.generate", "backend.launch", "languageServer.launch", "workspace.metadata"],
   "activationEvents": ["onBuildSystem:maven"],
@@ -329,6 +329,85 @@
         "executesProjectCode": true,
         "mayUseNetwork": true
       },
+      "runConfigurationTypes": [
+        {
+          "id": "maven",
+          "displayName": "Maven",
+          "description": "Runs Maven goals, lifecycle phases and options with mvn.",
+          "icon": {
+            "path": "icons/maven.svg"
+          },
+          "execution": "task",
+          "fields": [
+            {
+              "id": "goals",
+              "title": "Command line",
+              "description": "Maven goals, phases and options to run, such as clean package or test -Dtest=MyTest.",
+              "kind": "arguments",
+              "placeholder": "clean package",
+              "required": true
+            },
+            {
+              "id": "profiles",
+              "title": "Profiles",
+              "description": "Comma-separated Maven profiles to activate, or prefix with ! or - to deactivate, passed as -P.",
+              "kind": "text",
+              "placeholder": "dev, -integration",
+              "arguments": [
+                "-P",
+                "${value}"
+              ]
+            },
+            {
+              "id": "skipTests",
+              "title": "Skip tests",
+              "description": "Pass -DskipTests so test sources are compiled without running the tests.",
+              "kind": "checkbox",
+              "arguments": [
+                "-DskipTests"
+              ]
+            },
+            {
+              "id": "offline",
+              "title": "Work offline",
+              "description": "Pass -o so Maven resolves dependencies only from the local repository.",
+              "kind": "checkbox",
+              "arguments": [
+                "-o"
+              ]
+            }
+          ],
+          "arguments": [
+            "${field:goals}",
+            "${field:profiles}",
+            "${field:skipTests}",
+            "${field:offline}"
+          ]
+        }
+      ],
+      "beforeLaunchTasks": [
+        {
+          "id": "goal",
+          "displayName": "Run Maven Goal",
+          "description": "Runs Maven goals or phases, such as compile or test-compile, in the configuration's working directory before launch.",
+          "icon": {
+            "path": "icons/maven.svg"
+          },
+          "fields": [
+            {
+              "id": "goals",
+              "title": "Command line",
+              "description": "Maven goals, phases and options to run before launch, such as compile or package -DskipTests.",
+              "kind": "arguments",
+              "placeholder": "compile",
+              "required": true
+            }
+          ],
+          "arguments": [
+            "${field:goals}"
+          ]
+        }
+      ],
       "run": [
         {"id": "spring-boot", "source": "provider", "fromTargets": {"tags": ["spring-boot"]}, "execution": "service", "debug": {"configurationType": "java"}},
         {"id": "application", "source": "provider", "fromTargets": {"tags": ["java-application"]}, "execution": "application"},
@@ -543,5 +622,39 @@
   ],
   "requiresTools": ["java"],
   "backend": {"launch": {"kind": "runtime", "tool": "java", "minimumVersion": "8", "entry": "lib/lithe-maven-settings.jar", "runtimeArguments": ["-Xms16m", "-Xmx96m"]}},
-  "settingActions": [{"id": "compiler", "title": "Read compiler settings", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "compiler.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"compilerID": "maven"}}, {"id": "libraries", "title": "Read local JAR dependencies", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "libraries.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"buildSystemID": "maven"}}]
+  "settingActions": [{"id": "compiler", "title": "Read compiler settings", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "compiler.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"compilerID": "maven"}}, {"id": "libraries", "title": "Read local JAR dependencies", "description": "Read actual project settings using the project tool. This can execute project code and download dependencies. Save writes the displayed native configuration files.", "function": "libraries.settings", "sourceEditor": {"editFunction": "compiler.prepareSettings", "buildSystemID": "maven"}, "page": {"buildSystemID": "maven"}}],
+  "settingRegions": [
+    {
+      "id": "build",
+      "page": {
+        "buildSystemID": "maven"
+      },
+      "keywords": [
+        "mvn",
+        "mvnw",
+        "Maven Wrapper",
+        "MAVEN_HOME",
+        "pom.xml",
+        "settings.xml",
+        "localRepository",
+        ".m2",
+        "profiles",
+        "dependencies"
+      ]
+    },
+    {
+      "id": "compiler",
+      "page": {
+        "compilerID": "maven"
+      },
+      "keywords": [
+        "maven-compiler-plugin",
+        "javac",
+        "release",
+        "source",
+        "target",
+        "encoding"
+      ]
+    }
+  ]
 }
