@@ -67,12 +67,6 @@
       },
       "options": [
         {
-          "id": "javaHome",
-          "displayName": "JDK (JAVA_HOME)",
-          "kind": "directory",
-          "environment": {"JAVA_HOME": "${value}"}
-        },
-        {
           "id": "profiles",
           "displayName": "Profiles",
           "kind": "multiSelect",

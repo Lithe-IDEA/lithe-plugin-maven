@@ -87,7 +87,7 @@ JDT 侧的项目导入归 Java Support 插件维护。
 
 ## java-maven-project-settings
 
-**能力**：插件设置 Maven executable（全局，修改后重新读取模型）；构建选项 JDK (JAVA_HOME)、Profiles、Settings File、
+**能力**：插件设置 Maven executable（全局，修改后重新读取模型）；构建选项 Profiles、Settings File、
 Local Repository、Offline、Skip Tests，按工作区保存，加到构建、测试和读取模型的命令里。
 
 | 平台 | 实现 | 验证 | 说明 |
@@ -102,12 +102,12 @@ Local Repository、Offline、Skip Tests，按工作区保存，加到构建、�
 
 **实际值**：模型的 `optionDefaults` 报告 Settings File 和 Local Repository 在不传参数时 Maven 实际使用的值（用户设置文件为 `~/.m2/settings.xml`；本地仓库取本次读取的设置中的 `<localRepository>`，没有时为 `~/.m2/repository`）。宿主（Core `Lithe-core-rust#120`、`#121` 及以后、桌面 [1lck/Lithe-IDEA#2210](https://github.com/1lck/Lithe-IDEA/pull/2210)）据此显示 IDEA 式的“覆盖”复选框；旧宿主忽略这两项。2026-11-19 `scripts/test.mjs` 的 `the model reports the settings file and local repository Maven uses` 通过（macOS arm64）。
 
-**最近验证**：2026-11-18，`plugin.json` 与 `l10n/zh-Hans.json` 经 Core `9dea6aa6eaaf830c3568b647aa7daae5018b9727` schema 与 `plugins.settings.catalog` / `plugins.declarative.settingsState` 校验，`scripts/test.mjs` 断言全部通过，并在宿主 Viva 无头设置窗口验证中文分组名与关键词检索。2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 设置 Maven executable 为一个包装脚本后，确认模型重新读取和 `compile` 都运行了它。六个构建选项、按工作区保存和 `mvnw` / `MAVEN_HOME` 的候选顺序没有自动化覆盖。
+**最近验证**：2026-11-18，`plugin.json` 与 `l10n/zh-Hans.json` 经 Core `9dea6aa6eaaf830c3568b647aa7daae5018b9727` schema 与 `plugins.settings.catalog` / `plugins.declarative.settingsState` 校验，`scripts/test.mjs` 断言全部通过，并在宿主 Viva 无头设置窗口验证中文分组名与关键词检索。2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 设置 Maven executable 为一个包装脚本后，确认模型重新读取和 `compile` 都运行了它。五个构建选项、按工作区保存和 `mvnw` / `MAVEN_HOME` 的候选顺序没有自动化覆盖。
 
 **验证方法**（macOS）：
 
 1. Maven executable 留空时依次使用 `mvnw`、`MAVEN_HOME`、`PATH`；填写后总是用它，路径不存在时报错不回退。
-2. 逐个修改六个构建选项，确认命令行里出现对应参数，Offline 和 Skip Tests 在工具栏上切换。
+2. 逐个修改五个构建选项，确认命令行里出现对应参数，Offline 和 Skip Tests 在工具栏上切换；把项目 JDK 换成另一个版本，确认 Maven 编译和应用启动都用它（[1lck/Lithe-IDEA#2203](https://github.com/1lck/Lithe-IDEA/issues/2203)）。
 3. 关闭并重新打开工作区后构建选项保持；另一个工作区不受影响。
 
 **迁移来源**：主仓库 `shared/platform-feature-matrix/features/java-maven-project-settings.json`（b582e206a）。
