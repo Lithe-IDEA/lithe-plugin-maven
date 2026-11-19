@@ -443,6 +443,37 @@ async function test(signal) {
         cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
       });
     });
+
+    await check("the manifest declares Maven task run configurations, before-launch tasks and setting regions", () => {
+      assert.equal(manifest.requires?.runConfigurationTypes, 0);
+      assert.equal(manifest.requires?.beforeLaunchTasks, 0);
+
+      const mavenConfig = (buildSystem.runConfigurationTypes ?? []).find((item) => item.id === "maven");
+      assert.ok(mavenConfig, "maven runConfigurationType must exist");
+      assert.equal(mavenConfig.execution, "task");
+      assert.deepEqual(
+        mavenConfig.fields.map((field) => field.id),
+        ["goals", "profiles", "skipTests", "offline"],
+      );
+
+      const goalTask = (buildSystem.beforeLaunchTasks ?? []).find((item) => item.id === "goal");
+      assert.ok(goalTask, "goal beforeLaunchTask must exist");
+      assert.deepEqual(goalTask.fields.map((field) => field.id), ["goals"]);
+
+      const regions = Object.fromEntries((manifest.settingRegions ?? []).map((region) => [region.id, region]));
+      assert.equal(regions.build?.page?.buildSystemID, "maven");
+      assert.ok(Array.isArray(regions.build?.keywords) && regions.build.keywords.length > 0);
+      assert.equal(regions.compiler?.page?.compilerID, "maven");
+      assert.ok(Array.isArray(regions.compiler?.keywords) && regions.compiler.keywords.length > 0);
+
+      const zh = JSON.parse(readFileSync(join(pluginDir, "l10n", "zh-Hans.json"), "utf8"));
+      assert.ok(zh.settings?.mavenExecutable?.title, "zh-Hans settings.mavenExecutable");
+      assert.ok(zh.sections?.Maven, "zh-Hans sections.Maven");
+      assert.ok(Array.isArray(zh.settingRegions?.build?.keywords) && zh.settingRegions.build.keywords.length > 0);
+      assert.ok(Array.isArray(zh.settingRegions?.compiler?.keywords) && zh.settingRegions.compiler.keywords.length > 0);
+      assert.ok(zh.runConfigurationTypes?.maven?.maven?.displayName, "zh-Hans runConfigurationTypes.maven.maven");
+      assert.ok(zh.beforeLaunchTasks?.maven?.goal?.displayName, "zh-Hans beforeLaunchTasks.maven.goal");
+    });
   } catch (error) {
     failed = true;
     report.failure("integration lane failed", error);
