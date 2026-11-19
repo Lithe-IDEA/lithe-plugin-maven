@@ -100,6 +100,8 @@ Local Repository、Offline、Skip Tests，按工作区保存，加到构建、�
 
 **依赖的宿主能力**：`settings`（插件设置页和 `reload` 生效方式）、`settingRegions`（设置侧栏搜索关键词定位）、`buildSystems` 的构建选项和可执行文件候选顺序。
 
+**实际值**：模型的 `optionDefaults` 报告 Settings File 和 Local Repository 在不传参数时 Maven 实际使用的值（用户设置文件为 `~/.m2/settings.xml`；本地仓库取本次读取的设置中的 `<localRepository>`，没有时为 `~/.m2/repository`）。宿主（Core `Lithe-core-rust#120`、`#121` 及以后、桌面 [1lck/Lithe-IDEA#2210](https://github.com/1lck/Lithe-IDEA/pull/2210)）据此显示 IDEA 式的“覆盖”复选框；旧宿主忽略这两项。2026-11-19 `scripts/test.mjs` 的 `the model reports the settings file and local repository Maven uses` 通过（macOS arm64）。
+
 **最近验证**：2026-11-18，`plugin.json` 与 `l10n/zh-Hans.json` 经 Core `9dea6aa6eaaf830c3568b647aa7daae5018b9727` schema 与 `plugins.settings.catalog` / `plugins.declarative.settingsState` 校验，`scripts/test.mjs` 断言全部通过，并在宿主 Viva 无头设置窗口验证中文分组名与关键词检索。2026-11-14，macOS arm64，插件 0.0.1 发布包，宿主 `059d878d4`，`node scripts/e2e-host.mjs`：`TestOfficialMavenPluginBuildsAReactor` 设置 Maven executable 为一个包装脚本后，确认模型重新读取和 `compile` 都运行了它。六个构建选项、按工作区保存和 `mvnw` / `MAVEN_HOME` 的候选顺序没有自动化覆盖。
 
 **验证方法**（macOS）：
