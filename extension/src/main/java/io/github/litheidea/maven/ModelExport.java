@@ -128,11 +128,12 @@ final class ModelExport {
         document.put("tasks", tasks);
         document.put("contentRoots", contentRoots);
         document.put("optionValues", optionValues);
+        Map<String, Object> optionDefaults = new LinkedHashMap<>();
         if (!defaultProfiles.isEmpty()) {
-            Map<String, Object> optionDefaults = new LinkedHashMap<>();
             optionDefaults.put("profiles", new ArrayList<>(defaultProfiles));
-            document.put("optionDefaults", optionDefaults);
         }
+        pathDefaults(optionDefaults);
+        document.put("optionDefaults", optionDefaults);
         document.put("optionExcludePrefixes", optionExcludePrefixes);
         document.put("optionActiveChoices",
                 Collections.singletonMap("profiles", new ArrayList<>(activeProfileIds(profiles))));
@@ -431,6 +432,34 @@ final class ModelExport {
             LOG.warn("Lithe could not read settings.xml active profiles: {}", error.getMessage());
             return null;
         }
+    }
+
+    /**
+     * What Maven uses for the Settings File and Local Repository options when
+     * Lithe passes neither, which Lithe shows greyed until the user checks
+     * Override, as IntelliJ IDEA's Maven settings do
+     * ({@code MavenUtil.resolveUserSettingsPath} and
+     * {@code resolveLocalRepository}): the user settings file is
+     * {@code ~/.m2/settings.xml}, and the local repository is the one the
+     * settings this run read name (the user settings file, then the global
+     * one), else {@code ~/.m2/repository}. The settings read are the
+     * overridden file when the user set one, so the repository follows it
+     * as in IDEA. Hosts without this support ignore both entries.
+     */
+    private void pathDefaults(Map<String, Object> optionDefaults) {
+        File m2 = new File(System.getProperty("user.home"), ".m2");
+        optionDefaults.put("settingsFile",
+                Collections.singletonList(new File(m2, "settings.xml").getAbsolutePath()));
+        String repository = null;
+        Settings settings = effectiveSettings(cleanUserProperties());
+        if (settings != null && settings.getLocalRepository() != null
+                && !settings.getLocalRepository().trim().isEmpty()) {
+            repository = new File(settings.getLocalRepository().trim()).getAbsolutePath();
+        }
+        if (repository == null) {
+            repository = new File(m2, "repository").getAbsolutePath();
+        }
+        optionDefaults.put("localRepository", Collections.singletonList(repository));
     }
 
     private Properties cleanUserProperties() {

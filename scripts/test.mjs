@@ -24,7 +24,7 @@ import { createReport } from "./report.mjs";
 import { BackendClient } from "./compiler/backend-client.mjs";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 const PACKAGE_DIR = "io.github.lithe-idea.maven-build";
@@ -241,7 +241,7 @@ async function test(signal) {
 
     await check("profiles become choices of the Profiles option", () => {
       assert.deepEqual(model.optionValues.profiles, ["ci", "release"]);
-      assert.equal(model.optionDefaults, undefined);
+      assert.equal(model.optionDefaults.profiles, undefined);
       assert.deepEqual(model.optionActiveChoices, { profiles: [] });
       assert.deepEqual(model.optionExcludePrefixes, { profiles: "-" });
     });
@@ -301,18 +301,18 @@ async function test(signal) {
       }
       const initial = await readProfileModel("default", "");
       assert.deepEqual(initial.optionValues.profiles, ["dev", "prod"]);
-      assert.deepEqual(initial.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(initial.optionDefaults.profiles, ["dev"]);
       assert.deepEqual(initial.optionActiveChoices, { profiles: ["dev"] });
       assert.deepEqual(initial.optionExcludePrefixes, { profiles: "-" });
       assert.deepEqual(initial.projects.map((project) => project.name), ["profiles-reactor", "dev-module"]);
 
       const switched = await readProfileModel("switched", "-dev,prod");
-      assert.deepEqual(switched.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(switched.optionDefaults.profiles, ["dev"]);
       assert.deepEqual(switched.optionActiveChoices, { profiles: ["prod"] });
       assert.deepEqual(switched.projects.map((project) => project.name), ["profiles-reactor", "prod-module"]);
 
       const cleared = await readProfileModel("cleared", "-dev");
-      assert.deepEqual(cleared.optionDefaults, { profiles: ["dev"] });
+      assert.deepEqual(cleared.optionDefaults.profiles, ["dev"]);
       assert.deepEqual(cleared.optionActiveChoices, { profiles: [] });
       assert.deepEqual(cleared.projects.map((project) => project.name), ["profiles-reactor"]);
 
@@ -322,6 +322,21 @@ async function test(signal) {
       assert.deepEqual(fromBothSources.optionActiveChoices, { profiles: ["dev", "prod"] });
       assert.deepEqual(fromBothSources.projects.map((project) => project.name),
         ["profiles-reactor", "dev-module", "prod-module"]);
+    });
+
+    await check("the model reports the settings file and local repository Maven uses", async () => {
+      // Shown greyed until Override, as IDEA's Maven settings: the user settings file is always
+      // ~/.m2/settings.xml, and the repository is the one the settings read name, else ~/.m2/repository.
+      const m2 = join(homedir(), ".m2");
+      const plain = await readProfileModel("paths-default", "");
+      assert.deepEqual(plain.optionDefaults.settingsFile, [join(m2, "settings.xml")]);
+      assert.deepEqual(plain.optionDefaults.localRepository, [join(m2, "repository")]);
+      const repository = join(scratch, "settings-repository");
+      const settings = join(scratch, "paths-settings.xml");
+      writeFileSync(settings, `<settings><localRepository>${repository}</localRepository></settings>`);
+      const named = await readProfileModel("paths-settings", "", settings);
+      assert.deepEqual(named.optionDefaults.settingsFile, [join(m2, "settings.xml")]);
+      assert.deepEqual(named.optionDefaults.localRepository, [repository]);
     });
 
     await check("packaging activation is reflected in baseline defaults and can be disabled", async () => {
