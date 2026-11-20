@@ -100,8 +100,8 @@ func TestPluginNativeSourceVisual(t *testing.T) {
 				fetch := func(context.Context) (marketplace.Snapshot, error) {
 					return marketplace.Snapshot{Index: core.MarketplaceIndex{Plugins: []core.MarketplacePlugin{{ID: metadata.ID, Name: metadata.DisplayName, LatestVersion: metadata.Version}}}}, nil
 				}
-				w := newWindow(NewController(Options{Text: func() *i18n.Messages { return i18n.For(language) }, Language: func() i18n.Language { return language }, SystemLanguage: language, SystemDark: func() bool { return theme == "dark" }, PluginSettings: source, SettingsNavigation: core.NewClient().SettingsNavigation, SettingsPages: func(ctx context.Context) ([]core.SettingsPage, error) {
-					return core.NewClient().SettingsPages(ctx, []core.SettingsContribution{{Manifest: manifest, Owner: core.PluginSettingsOwner{PluginID: metadata.ID, Version: metadata.Version}, Enabled: true}})
+				w := newWindow(NewController(Options{Text: func() *i18n.Messages { return i18n.For(language) }, Language: func() i18n.Language { return language }, SystemLanguage: language, SystemDark: func() bool { return theme == "dark" }, PluginSettings: source, SettingsNavigation: core.NewClient().SettingsNavigation, SettingsPages: func(ctx context.Context, language i18n.Language) ([]core.SettingsPage, error) {
+					return core.NewClient().SettingsPages(ctx, []core.SettingsContribution{{Manifest: manifest, Owner: core.PluginSettingsOwner{PluginID: metadata.ID, Version: metadata.Version}, Enabled: true}}, language.Code())
 				}, Marketplace: fetch, MarketplaceInstalled: fetch, PluginState: func(string) PluginState {
 					return PluginState{Installed: true, Enabled: true, Version: metadata.Version}
 				}}), Values{Theme: theme, Language: language.Code()})

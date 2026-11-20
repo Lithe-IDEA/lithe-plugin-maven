@@ -201,6 +201,35 @@ async function prepareRuns(signal) {
       assert.ok(debug.arguments.indexOf("-cp") > debug.arguments.findIndex((argument) => argument.startsWith("-agentlib:jdwp")));
     });
 
+    await check("Debug prepares an ordinary application on the host's JDWP port", async () => {
+      const application = buildSystem.run.find((run) => run.id === "application");
+      assert.equal(application.execution ?? "application", "application");
+      assert.equal(application.debug?.configurationType, "java");
+      const plan = await prepare({ name: "Main", path: "app", tags: ["java-application"], properties: { mainClass: "demo.app.Main" } }, {
+        launchOptions: { execution: application.execution ?? "application", runtimeArguments: ["-Dfixture=enabled"], arguments: ["fixture"], environment: { LITHE_FIXTURE: "set" },
+          workingDirectory: "app", debug: { adapterID: "dev.example/java", configurationType: application.debug.configurationType,
+            target: { kind: "connection", host: "127.0.0.1", port: 51236 } } },
+      });
+      assert.equal(plan.workingDirectory, "app");
+      assert.deepEqual(plan.environment, { LITHE_FIXTURE: "set" });
+      assert.ok(plan.arguments.includes("-Dfixture=enabled"));
+      assert.ok(plan.arguments.includes("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:51236"));
+      assert.deepEqual(plan.arguments.slice(plan.arguments.indexOf("-cp") + 2), ["demo.app.Main", "fixture", "typed"]);
+    });
+
+    await check("Debug prepares a source entrypoint without a named target", async () => {
+      const main = buildSystem.run.find((run) => run.entrypoints);
+      assert.equal(main.debug?.configurationType, "java");
+      const plan = await request({ path: "app", tags: [] }, {
+        run: main.id, target: undefined, userArguments: [],
+        launchOptions: { execution: "application", runtimeArguments: [], arguments: ["fixture"], environment: {},
+          entrypoint: "demo.app.Main", debug: { adapterID: "dev.example/java", configurationType: main.debug.configurationType,
+            target: { kind: "connection", host: "127.0.0.1", port: 51237 } } },
+      });
+      assert.ok(plan.arguments.includes("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:51237"));
+      assert.deepEqual(plan.arguments.slice(plan.arguments.indexOf("-cp") + 2), ["demo.app.Main", "fixture"]);
+    });
+
     await check("a failed build ends preparation with the provider's error", async () => {
       writeFileSync(join(root, "service", "src", "main", "java", "demo", "service", "Broken.java"), "package demo.service; class Broken {");
       try {
@@ -424,6 +453,7 @@ async function test(signal) {
       assert.ok(buildSystem.run.every((run) => run.source === "provider"));
       assert.equal(runs.main.entrypoints, true, "Run on Current File starts any main class through the main run");
       assert.equal(manifest.requires.buildProviders, 1);
+      assert.equal(manifest.requires.buildSystems, 2);
     });
 
     const projectDependencies = await document("read project dependencies", buildSystem.dependencies, signal, { project: "app" });
