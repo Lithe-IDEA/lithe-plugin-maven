@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/1lck/Lithe-IDEA",
-  "revision": "e9ce7781f1a9635ced8a090b45a159af4f5ce959",
-  "coreRevision": "5802c42b5766df7375bd427c54203db415ff72d7",
+  "revision": "0d4e28fe4d4ebb6741a4faa30a0c7ec8c3c8609d",
+  "coreRevision": "39aa5fb51fcbc9c986536d1c48ab9665e4a68a62",
   "package": "io.github.lithe-idea.maven-build"
 }
