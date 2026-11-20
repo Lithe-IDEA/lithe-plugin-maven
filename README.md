@@ -103,7 +103,7 @@ brew install maven
 | `main` | 入口运行（`entrypoints: true`）：标题栏选“当前文件”点运行时，提供者回答当前文件里带有效 `main` 方法（含 Java 21+/25 非静态无参 `void main()` 及紧凑源文件）的类，Lithe 把它存成以类名命名的运行配置后运行；POM 里不用写主类 | 应用 |
 
 “当前文件”的入口（`lithe/build/runEntrypoints`）只读这一个文件：模块是文件上方最近一个有 `pom.xml` 的目录，类名是包名加文件名，
-测试源码（`src/test/`）不算，因为运行用的运行时类路径里没有测试类。从 1.0.1 起插件需要 Lithe 桌面端 0.8.5 及以上（支持 `buildProviders` 1）。
+测试源码（`src/test/`）不算，因为运行用的运行时类路径里没有测试类。当前插件声明了 `buildProviders: 1`、`runConfigurationTypes: 0` 与 `beforeLaunchTasks: 0`，需要 Lithe 桌面端 0.8.7 及以上（推荐 0.8.10 及以上以获得完整的项目识别、构建探测与启动修复）。
 
 列 target 只读源码开头和 POM，不编译。运行时 Lithe 启动随包的构建提供者 `lib/lithe-maven-provider.jar`
 （源码在 `provider/`），由它准备运行：
