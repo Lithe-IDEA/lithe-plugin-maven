@@ -143,14 +143,21 @@ async function prepareRuns(signal) {
     const service = await prepare({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: { mainClass: "demo.service.ServiceApplication" } }, {
       launchOptions: { execution: "service", runtimeArguments: ["-Dgreeting=hi there"], arguments: ["--port=0"], environment: { LITHE_FIXTURE: "set" } },
     });
-    await check("a service run compiles its reactor dependencies and launches its main class", () => {
-      assert.equal(service.workingDirectory, "service");
+    await check("a service run compiles its reactor dependencies and launches its main class from the build root", () => {
+      assert.equal(service.workingDirectory, ".");
       assert.deepEqual(service.environment, { LITHE_FIXTURE: "set" });
       const classpath = service.arguments[service.arguments.indexOf("-cp") + 1].split(delimiter);
       assert.equal(classpath[0], join(root, "service", "target", "classes"));
       assert.ok(classpath.includes(join(root, "core", "target", "classes")), "the uninstalled sibling comes from the reactor");
       assert.ok(!classpath.some((entry) => entry.includes("junit")), "test dependencies stay off the runtime classpath");
       assert.equal(launch(service).trim(), "Hello, service greeting=hi there arguments=--port=0,typed env=set");
+    });
+
+    const explicitWorkingDir = await prepare({ name: "ServiceApplication", path: "service", tags: ["spring-boot"], properties: { mainClass: "demo.service.ServiceApplication" } }, {
+      launchOptions: { execution: "service", runtimeArguments: [], arguments: [], environment: {}, workingDirectory: "service" },
+    });
+    await check("an explicit launchOptions workingDirectory overrides the build-root default", () => {
+      assert.equal(explicitWorkingDir.workingDirectory, "service");
     });
 
     // Without a main class in the model, the compiled classes decide, as spring-boot-maven-plugin does.
@@ -459,6 +466,8 @@ async function test(signal) {
       });
     });
 
+    await verifyExtendedBootAndProvided(signal);
+
     await check("the manifest declares Maven task run configurations, before-launch tasks and setting regions", () => {
       assert.equal(manifest.requires?.runConfigurationTypes, 0);
       assert.equal(manifest.requires?.beforeLaunchTasks, 0);
@@ -498,5 +507,177 @@ async function test(signal) {
     finally { report.write(); }
   }
   process.exitCode = failed ? 1 : 0;
+}
+
+/**
+ * Covers composed/custom @interface Spring Boot annotations across reactor modules,
+ * provided-scope runtime classpath handling, and Java 21+/25 main() entrypoint forms.
+ */
+async function verifyExtendedBootAndProvided(signal) {
+  const extRoot = join(scratch, "extended-reactor");
+  const write = (rel, content) => {
+    const file = join(extRoot, rel);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, content);
+  };
+  write("pom.xml", [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+    "  <modelVersion>4.0.0</modelVersion>",
+    "  <groupId>demo.ext</groupId>",
+    "  <artifactId>extended-reactor</artifactId>",
+    "  <version>1.0.0-SNAPSHOT</version>",
+    "  <packaging>pom</packaging>",
+    "  <modules>",
+    "    <module>provided-lib</module>",
+    "    <module>meta</module>",
+    "    <module>apps</module>",
+    "    <module>custom-boot</module>",
+    "    <module>plain</module>",
+    "  </modules>",
+    "  <properties>",
+    "    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>",
+    "    <maven.compiler.release>8</maven.compiler.release>",
+    "  </properties>",
+    "  <build><pluginManagement><plugins>",
+    "    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin>",
+    "  </plugins></pluginManagement></build>",
+    "</project>",
+  ].join("\n"));
+  for (const [mod, deps] of [
+    ["provided-lib", ""],
+    ["meta", ""],
+    ["apps", [
+      "<dependency><groupId>demo.ext</groupId><artifactId>meta</artifactId><version>1.0.0-SNAPSHOT</version></dependency>",
+      "<dependency><groupId>demo.ext</groupId><artifactId>provided-lib</artifactId><version>1.0.0-SNAPSHOT</version><scope>provided</scope></dependency>",
+    ].join("\n    ")],
+    ["custom-boot", "<dependency><groupId>demo.ext</groupId><artifactId>meta</artifactId><version>1.0.0-SNAPSHOT</version></dependency>"],
+    ["plain", "<dependency><groupId>demo.ext</groupId><artifactId>provided-lib</artifactId><version>1.0.0-SNAPSHOT</version><scope>provided</scope></dependency>"],
+  ]) {
+    write(`${mod}/pom.xml`, [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+      "  <modelVersion>4.0.0</modelVersion>",
+      "  <parent><groupId>demo.ext</groupId><artifactId>extended-reactor</artifactId><version>1.0.0-SNAPSHOT</version></parent>",
+      `  <artifactId>${mod}</artifactId>`,
+      deps ? `  <dependencies>\n    ${deps}\n  </dependencies>` : "",
+      "</project>",
+    ].join("\n"));
+  }
+  write("provided-lib/src/main/java/demo/provided/ProvidedBanner.java",
+    "package demo.provided;\npublic class ProvidedBanner { public static String text() { return \"provided-ok\"; } }\n");
+  write("meta/src/main/java/org/springframework/boot/autoconfigure/SpringBootApplication.java",
+    "package org.springframework.boot.autoconfigure;\nimport java.lang.annotation.*;\n@Target(ElementType.TYPE)\n@Retention(RetentionPolicy.RUNTIME)\npublic @interface SpringBootApplication {}\n");
+  write("meta/src/main/java/org/springframework/boot/autoconfigure/EnableAutoConfiguration.java",
+    "package org.springframework.boot.autoconfigure;\nimport java.lang.annotation.*;\n@Target(ElementType.TYPE)\n@Retention(RetentionPolicy.RUNTIME)\npublic @interface EnableAutoConfiguration {}\n");
+  write("meta/src/main/java/org/springframework/cloud/client/SpringCloudApplication.java",
+    "package org.springframework.cloud.client;\nimport java.lang.annotation.*;\n@Target(ElementType.TYPE)\n@Retention(RetentionPolicy.RUNTIME)\npublic @interface SpringCloudApplication {}\n");
+  write("meta/src/main/java/demo/meta/MyBootApp.java",
+    "package demo.meta;\nimport java.lang.annotation.*;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@Target(ElementType.TYPE)\n@Retention(RetentionPolicy.CLASS)\n@SpringBootApplication\npublic @interface MyBootApp {}\n");
+  write("meta/src/main/java/demo/meta/TransitiveBootApp.java",
+    "package demo.meta;\nimport java.lang.annotation.*;\n@Target(ElementType.TYPE)\n@Retention(RetentionPolicy.CLASS)\n@MyBootApp\npublic @interface TransitiveBootApp {}\n");
+  write("apps/src/main/java/demo/apps/CloudApp.java",
+    "package demo.apps;\nimport org.springframework.cloud.client.SpringCloudApplication;\n@SpringCloudApplication\npublic class CloudApp {\n  public static void main(String[] args) {}\n}\n");
+  write("apps/src/main/java/demo/apps/AutoBootApp.java",
+    "package demo.apps;\nimport org.springframework.boot.autoconfigure.EnableAutoConfiguration;\n@EnableAutoConfiguration\npublic class AutoBootApp {\n  void main() { System.out.println(\"auto-main\"); }\n}\n");
+  write("apps/src/main/java/demo/apps/HelperAutoConfig.java",
+    "package demo.apps;\nimport org.springframework.boot.autoconfigure.EnableAutoConfiguration;\n@EnableAutoConfiguration\npublic class HelperAutoConfig {}\n");
+  write("apps/src/main/java/demo/apps/CustomMetaApp.java",
+    "package demo.apps;\nimport demo.meta.TransitiveBootApp;\nimport demo.provided.ProvidedBanner;\n@TransitiveBootApp\npublic class CustomMetaApp {\n  public static void main(String[] args) { System.out.println(ProvidedBanner.text()); }\n}\n");
+  write("plain/src/main/java/demo/plain/InstanceVoidMain.java",
+    "package demo.plain;\npublic class InstanceVoidMain {\n  void main() {}\n}\n");
+  write("custom-boot/src/main/java/demo/custom/HelperMain.java",
+    "package demo.custom;\nimport demo.meta.MyBootApp;\n@MyBootApp\npublic class HelperMain {\n  public static void main(String[] args) {}\n}\n");
+  write("custom-boot/src/main/java/demo/custom/PlainExtraMain.java",
+    "package demo.custom;\npublic class PlainExtraMain {\n  public static void main(String[] args) {}\n}\n");
+  write("plain/src/main/java/demo/plain/PrivateMain.java",
+    "package demo.plain;\npublic class PrivateMain {\n  private static void main(String[] args) {}\n}\n");
+  // Compact source file (no package/class header) for source-level entrypoint detection only (not compiled on Java 8).
+  const compactFile = "plain/src/main/java/CompactMain.java";
+  write(compactFile, "void main() {\n  System.out.println(\"compact\");\n}\n");
+
+  const extOut = join(outputs, "extended-model.json");
+  await run("read extended boot model", extRoot, buildSystem.model.arguments, signal, { outputFile: extOut });
+  const extModel = JSON.parse(readFileSync(extOut, "utf8"));
+  const extByName = (name) => extModel.projects.find((project) => project.name === name).path;
+  await check("composed and cross-module @interface Boot annotations become spring-boot targets", () => {
+    const actual = extModel.targets.map((target) => [target.project, target.properties.mainClass, target.tags]);
+    assert.deepEqual(actual, [
+      [extByName("apps"), "demo.apps.AutoBootApp", ["spring-boot"]],
+      [extByName("apps"), "demo.apps.CloudApp", ["spring-boot"]],
+      [extByName("apps"), "demo.apps.CustomMetaApp", ["spring-boot"]],
+      [extByName("custom-boot"), "demo.custom.HelperMain", ["spring-boot"]],
+    ]);
+  });
+
+  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], timeoutMs: timeoutMs });
+  try {
+    await report.step("start provider for extended boot and Java 21 entrypoints", () => client.initialize(extRoot));
+    let operation = 0;
+    const entrypoints = (file) => client.request("lithe/build/runEntrypoints", {
+      operationID: `ext-entry-${++operation}`, buildSystemID: "maven", root: ".", file,
+    });
+    const instanceEntry = await entrypoints("plain/src/main/java/demo/plain/InstanceVoidMain.java");
+    const compactEntry = await entrypoints(compactFile);
+    const privateEntry = await entrypoints("plain/src/main/java/demo/plain/PrivateMain.java");
+    await check("runEntrypoints accepts Java 21+ void main() and compact sources while rejecting private main()", () => {
+      assert.deepEqual(instanceEntry.entrypoints, [
+        { run: "main", name: "InstanceVoidMain", entrypoint: "demo.plain.InstanceVoidMain", project: { name: "plain", path: "plain" } },
+      ]);
+      assert.deepEqual(compactEntry.entrypoints, [
+        { run: "main", name: "CompactMain", entrypoint: "CompactMain", project: { name: "plain", path: "plain" } },
+      ]);
+      assert.deepEqual(privateEntry.entrypoints, []);
+    });
+    // Remove compact source before invoking javac/mvn so Java 8 CI compiles cleanly.
+    rmSync(join(extRoot, compactFile));
+
+    const bootProvided = await client.request("lithe/build/prepareRun", {
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      tool: { executable: maven }, run: "spring-boot", project: { name: "apps", path: "apps" },
+      target: { name: "CustomMetaApp", path: "apps", tags: ["spring-boot"], properties: { mainClass: "demo.apps.CustomMetaApp" } },
+      userArguments: [],
+    });
+    const bootNoProvided = await client.request("lithe/build/prepareRun", {
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {},
+      optionArguments: ["-Dlithe.runIncludeProvided=false"], environment: {},
+      tool: { executable: maven }, run: "spring-boot", project: { name: "apps", path: "apps" },
+      target: { name: "CustomMetaApp", path: "apps", tags: ["spring-boot"], properties: { mainClass: "demo.apps.CustomMetaApp" } },
+      userArguments: [],
+    });
+    const customBootDiscovered = await client.request("lithe/build/prepareRun", {
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      tool: { executable: maven }, run: "spring-boot", project: { name: "custom-boot", path: "custom-boot" },
+      target: { name: "HelperMain", path: "custom-boot", tags: ["spring-boot"], properties: {} },
+      userArguments: [],
+    });
+    const plainPrepared = await client.request("lithe/build/prepareRun", {
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      tool: { executable: maven }, run: "application", project: { name: "plain", path: "plain" },
+      target: { name: "InstanceVoidMain", path: "plain", tags: ["java-application"], properties: {} },
+      userArguments: [],
+    });
+    await check("Spring Boot includes provided dependencies by default, respects override, and bytecode detects custom Boot & InstanceVoidMain", () => {
+      const bootCp = bootProvided.arguments[bootProvided.arguments.indexOf("-cp") + 1].split(delimiter);
+      const providedClasses = join(extRoot, "provided-lib", "target", "classes");
+      assert.ok(bootCp.includes(providedClasses), "spring-boot includes provided-scope reactor classes");
+      const output = execFileSync("java", bootProvided.arguments, { cwd: join(extRoot, bootProvided.workingDirectory), encoding: "utf8", timeout: timeoutMs });
+      assert.equal(output.trim(), "provided-ok");
+
+      const suppressedCp = bootNoProvided.arguments[bootNoProvided.arguments.indexOf("-cp") + 1].split(delimiter);
+      assert.ok(!suppressedCp.includes(providedClasses), "-Dlithe.runIncludeProvided=false excludes provided scope");
+
+      const discoveredMain = customBootDiscovered.arguments[customBootDiscovered.arguments.indexOf("-cp") + 2];
+      assert.equal(discoveredMain, "demo.custom.HelperMain", "bytecode custom boot descriptor disambiguates HelperMain over PlainExtraMain");
+
+      const plainCp = plainPrepared.arguments[plainPrepared.arguments.indexOf("-cp") + 1].split(delimiter);
+      assert.ok(!plainCp.includes(providedClasses), "plain jar application excludes provided scope");
+      assert.equal(plainPrepared.arguments[plainPrepared.arguments.indexOf("-cp") + 2], "demo.plain.InstanceVoidMain");
+    });
+    await report.step("stop extended boot provider", () => client.close());
+  } catch (error) {
+    client.kill();
+    throw error;
+  }
 }
 await withInterrupts(test);

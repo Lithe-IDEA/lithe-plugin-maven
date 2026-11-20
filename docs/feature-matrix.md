@@ -205,9 +205,9 @@ ArtifactId）；Maven Archetype 用内置或自定义原型，由 `mvn archetype
 
 ## maven-run-applications
 
-**能力**：读取项目时把 Spring Boot 应用（`@SpringBootApplication` 类或 `spring-boot-maven-plugin`）和写明主类的
-Java 应用（`exec-maven-plugin`、jar 清单）列为 target，`run` 声明把它们变成运行配置；构建提供者
-`lib/lithe-maven-provider.jar` 准备运行：编译模块及其反应堆依赖，导出运行时类路径和主类，返回 `java -cp … 主类`。
+**能力**：读取项目时把 Spring Boot 应用（`@SpringBootApplication`、`@SpringCloudApplication`、跨模块自定义 Boot `@interface` 元注解、带 `main` 的 `@EnableAutoConfiguration`，或 `spring-boot-maven-plugin`）和写明主类的
+Java 应用（`exec-maven-plugin`、jar 清单）以及 Java 21+/25 `main` 入口（含无参实例 `void main()` 与紧凑源文件）列为 target/entrypoint，`run` 声明把它们变成运行配置；构建提供者
+`lib/lithe-maven-provider.jar` 准备运行：编译模块及其反应堆依赖，导出运行时类路径（Spring Boot / WAR 默认纳入 `provided` 依赖）和主类，默认以构建根 `request.root` 为工作目录返回 `java -cp … 主类`。
 Spring Boot 运行声明了按配置类型连接的调试：宿主带调试端口请求时，提供者加 `-agentlib:jdwp` 挂起到调试器连上，宿主再用已启用的 `java` 类型适配器（Java Support）连接（宿主流程见 [1lck/Lithe-IDEA#2113](https://github.com/1lck/Lithe-IDEA/pull/2113)）。
 
 **证据**：`plugin.json` 的 `buildSystems[0].provider` 和 `buildSystems[0].run`、`extension/.../Applications.java`、

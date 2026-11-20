@@ -7,6 +7,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -44,8 +46,15 @@ import org.eclipse.aether.graph.DependencyFilter;
 final class RunExport {
     static final int MAX_CLASSES = 50_000;
     private static final String SPRING_BOOT_APPLICATION = "Lorg/springframework/boot/autoconfigure/SpringBootApplication;";
-    private static final int ACC_PUBLIC = 0x0001;
+    private static final String SPRING_CLOUD_APPLICATION = "Lorg/springframework/cloud/client/SpringCloudApplication;";
+    private static final String ENABLE_AUTO_CONFIGURATION = "Lorg/springframework/boot/autoconfigure/EnableAutoConfiguration;";
+    private static final Set<String> BUILTIN_BOOT_DESCRIPTORS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(Arrays.asList(SPRING_BOOT_APPLICATION, SPRING_CLOUD_APPLICATION, ENABLE_AUTO_CONFIGURATION)));
+    private static final int ACC_PRIVATE = 0x0002;
     private static final int ACC_STATIC = 0x0008;
+    private static final int ACC_INTERFACE = 0x0200;
+    private static final int ACC_ABSTRACT = 0x0400;
+    private static final int ACC_ANNOTATION = 0x2000;
 
     private final MavenSession session;
     private final ProjectDependenciesResolver resolver;
@@ -56,21 +65,42 @@ final class RunExport {
     }
 
     Map<String, Object> document(String projectPath) throws MavenExecutionException {
+        return document(projectPath, null);
+    }
+
+    Map<String, Object> document(String projectPath, Boolean includeProvided) throws MavenExecutionException {
         MavenProject project = ModelExport.project(session, projectPath);
         File output = new File(project.getBuild().getOutputDirectory());
+        boolean withProvided = shouldIncludeProvided(project, includeProvided);
         List<String> classpath = new ArrayList<>();
         classpath.add(ModelExport.path(output));
-        classpath.addAll(dependencies(project));
+        classpath.addAll(dependencies(project, withProvided));
+        Set<String> descriptors = bootDescriptors(session.getProjects());
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("format", "litheMavenRun");
         document.put("version", 0);
         document.put("outputDirectory", ModelExport.path(output));
         document.put("classpath", classpath);
-        document.put("mainClasses", mainClasses(output));
+        document.put("mainClasses", mainClasses(output, descriptors));
         return document;
     }
 
-    private List<String> dependencies(MavenProject project) throws MavenExecutionException {
+    static boolean shouldIncludeProvided(MavenProject project, Boolean explicit) {
+        if (explicit != null) {
+            return explicit.booleanValue();
+        }
+        return "war".equals(project.getPackaging()) || Applications.hasSpringBootPlugin(project);
+    }
+
+    private static Set<String> bootDescriptors(List<MavenProject> projects) {
+        Set<String> descriptors = new LinkedHashSet<>(BUILTIN_BOOT_DESCRIPTORS);
+        for (String fqn : Applications.customBootAnnotations(projects)) {
+            descriptors.add("L" + fqn.replace('.', '/') + ";");
+        }
+        return descriptors;
+    }
+
+    private List<String> dependencies(MavenProject project, final boolean includeProvided) throws MavenExecutionException {
         DefaultDependencyResolutionRequest request =
                 new DefaultDependencyResolutionRequest(project, session.getRepositorySession());
         DependencyFilter runtime = (node, parents) -> {
@@ -79,7 +109,7 @@ final class RunExport {
                 return true;
             }
             String scope = dependency.getScope();
-            return !"test".equals(scope) && !"provided".equals(scope);
+            return !"test".equals(scope) && (includeProvided || !"provided".equals(scope));
         };
         request.setResolutionFilter(runtime);
         DependencyResolutionResult result;
@@ -93,7 +123,7 @@ final class RunExport {
         Set<String> paths = new LinkedHashSet<>();
         for (Dependency dependency : result.getDependencies()) {
             String scope = dependency.getScope();
-            if ("test".equals(scope) || "provided".equals(scope)) {
+            if ("test".equals(scope) || (!includeProvided && "provided".equals(scope))) {
                 continue;
             }
             File file = dependency.getArtifact().getFile();
@@ -106,6 +136,11 @@ final class RunExport {
 
     /** The main classes under output, sorted by name. */
     static List<Object> mainClasses(File output) {
+        return mainClasses(output, BUILTIN_BOOT_DESCRIPTORS);
+    }
+
+    /** The main classes under output, matching built-in or custom Boot descriptors. */
+    static List<Object> mainClasses(File output, Set<String> bootDescriptors) {
         Map<String, Boolean> found = new TreeMap<>();
         if (!output.isDirectory()) {
             return new ArrayList<>();
@@ -122,7 +157,7 @@ final class RunExport {
                 if (child.isDirectory()) {
                     pending.push(child);
                 } else if (child.getName().endsWith(".class") && child.getName().indexOf('$') < 0 && budget-- > 0) {
-                    ClassFacts facts = read(child);
+                    ClassFacts facts = read(child, bootDescriptors);
                     if (facts != null && facts.main) {
                         found.put(facts.name, facts.springBoot);
                     }
@@ -153,6 +188,12 @@ final class RunExport {
 
     /** The facts of one class file, or null when it is not one. */
     static ClassFacts read(File file) {
+        return read(file, BUILTIN_BOOT_DESCRIPTORS);
+    }
+
+    /** The facts of one class file against recognized Boot descriptors, or null when unreadable/annotation. */
+    static ClassFacts read(File file, Set<String> bootDescriptors) {
+        Set<String> descriptors = bootDescriptors == null ? BUILTIN_BOOT_DESCRIPTORS : bootDescriptors;
         try (InputStream stream = Files.newInputStream(file.toPath());
                 DataInputStream in = new DataInputStream(new java.io.BufferedInputStream(stream))) {
             if (in.readInt() != 0xCAFEBABE) {
@@ -169,7 +210,7 @@ final class RunExport {
                 switch (tag) {
                     case 1:
                         utf8[index] = in.readUTF();
-                        springBoot |= SPRING_BOOT_APPLICATION.equals(utf8[index]);
+                        springBoot |= descriptors.contains(utf8[index]);
                         break;
                     case 7:
                         classNames[index] = in.readUnsignedShort();
@@ -192,7 +233,7 @@ final class RunExport {
                         return null;
                 }
             }
-            in.readUnsignedShort();
+            int classAccess = in.readUnsignedShort();
             int self = in.readUnsignedShort();
             in.readUnsignedShort();
             skip(in, in.readUnsignedShort() * 2);
@@ -201,6 +242,10 @@ final class RunExport {
                 skip(in, 6);
                 skipAttributes(in);
             }
+            if ((classAccess & ACC_ANNOTATION) != 0) {
+                return null;
+            }
+            boolean requiresStatic = (classAccess & (ACC_INTERFACE | ACC_ABSTRACT)) != 0;
             boolean main = false;
             int methods = in.readUnsignedShort();
             for (int index = 0; index < methods; index++) {
@@ -208,8 +253,10 @@ final class RunExport {
                 String name = utf8[in.readUnsignedShort()];
                 String descriptor = utf8[in.readUnsignedShort()];
                 skipAttributes(in);
-                main |= (access & (ACC_PUBLIC | ACC_STATIC)) == (ACC_PUBLIC | ACC_STATIC)
-                        && "main".equals(name) && "([Ljava/lang/String;)V".equals(descriptor);
+                boolean validAccess = (access & (ACC_PRIVATE | ACC_ABSTRACT)) == 0
+                        && (!requiresStatic || (access & ACC_STATIC) != 0);
+                boolean validSignature = "([Ljava/lang/String;)V".equals(descriptor) || "()V".equals(descriptor);
+                main |= validAccess && "main".equals(name) && validSignature;
             }
             String internal = self > 0 && self < count ? utf8[classNames[self]] : null;
             return internal == null ? null : new ClassFacts(internal.replace('/', '.'), main, springBoot);

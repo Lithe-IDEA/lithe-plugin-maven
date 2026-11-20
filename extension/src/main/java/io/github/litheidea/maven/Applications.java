@@ -8,10 +8,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -52,11 +56,20 @@ final class Applications {
     static final int MAX_FILES = 20_000;
     static final int HEAD_BYTES = 64 * 1024;
 
-    private static final Pattern ANNOTATION = Pattern.compile(
-            "@(?:org\\.springframework\\.boot\\.autoconfigure\\.)?SpringBootApplication\\b");
+    private static final String SPRING_BOOT_APPLICATION = "org.springframework.boot.autoconfigure.SpringBootApplication";
+    private static final String SPRING_CLOUD_APPLICATION = "org.springframework.cloud.client.SpringCloudApplication";
+    private static final String ENABLE_AUTO_CONFIGURATION = "org.springframework.boot.autoconfigure.EnableAutoConfiguration";
+    private static final Set<String> BUILTIN_BOOT_ANNOTATIONS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(Arrays.asList(SPRING_BOOT_APPLICATION, SPRING_CLOUD_APPLICATION)));
+
     private static final Pattern PACKAGE = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
-    private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
-    private static final Pattern LINE_COMMENT = Pattern.compile("//[^\\n]*");
+    private static final Pattern IMPORT_DECL = Pattern.compile("^\\s*import\\s+(?!static\\s+)([\\w.]+)(\\.\\*)?\\s*;", Pattern.MULTILINE);
+    private static final Pattern ANNOTATION_USE = Pattern.compile("@([A-Za-z_][\\w.$]*)");
+    private static final Pattern VOID_MAIN = Pattern.compile(
+            "\\bvoid\\s+main\\s*\\(\\s*([^)]*)\\)\\s*(?:throws\\s+[\\w$.]+(?:\\s*,\\s*[\\w$.]+)*)?\\s*\\{");
+    private static final Pattern STRING_ARG = Pattern.compile(
+            "^(?:final\\s+)?(?:java\\.lang\\.)?String\\s*(?:\\[\\s*]\\s*[\\w$]+|\\.\\.\\.\\s*[\\w$]+|[\\w$]+\\s*\\[\\s*])$");
+    private static final Pattern DISALLOWED_MODIFIER = Pattern.compile("\\b(?:private|abstract|default)\\b");
 
     private Applications() {}
 
@@ -90,11 +103,16 @@ final class Applications {
 
     /** The applications of project, in a stable order. */
     static List<Application> of(MavenProject project) {
+        return of(project, Collections.<String>emptySet());
+    }
+
+    /** The applications of project, including any reactor custom Boot meta-annotations. */
+    static List<Application> of(MavenProject project, Set<String> extraBootAnnotations) {
         List<Application> result = new ArrayList<>();
         if ("pom".equals(project.getPackaging())) {
             return result;
         }
-        List<String> annotated = annotatedClasses(project);
+        List<String> annotated = annotatedClasses(project, extraBootAnnotations);
         for (String main : annotated) {
             result.add(new Application(name(main, annotated), SPRING_BOOT, main));
         }
@@ -120,6 +138,10 @@ final class Applications {
         return result;
     }
 
+    static boolean hasSpringBootPlugin(MavenProject project) {
+        return plugin(project, "org.springframework.boot", "spring-boot-maven-plugin") != null;
+    }
+
     /**
      * The simple class name, or the full one when another application of
      * the project has the same simple name: Lithe identifies a target by its
@@ -140,70 +162,293 @@ final class Applications {
         return className.substring(className.lastIndexOf('.') + 1);
     }
 
+    /** Discovers custom {@code @interface} Boot meta-annotations declared anywhere in the reactor. */
+    static Set<String> customBootAnnotations(List<MavenProject> projects) {
+        List<MetaAnnotation> candidates = new ArrayList<>();
+        int[] budget = {MAX_FILES};
+        for (MavenProject project : projects) {
+            if ("pom".equals(project.getPackaging())) {
+                continue;
+            }
+            scanMetaAnnotations(project, candidates, budget);
+        }
+        Set<String> known = new LinkedHashSet<>(BUILTIN_BOOT_ANNOTATIONS);
+        known.add(ENABLE_AUTO_CONFIGURATION);
+        Set<String> custom = new LinkedHashSet<>();
+        boolean changed;
+        do {
+            changed = false;
+            for (MetaAnnotation meta : candidates) {
+                if (!custom.contains(meta.fqn) && meta.header.matchesAny(known)) {
+                    custom.add(meta.fqn);
+                    known.add(meta.fqn);
+                    changed = true;
+                }
+            }
+        } while (changed);
+        return custom;
+    }
+
+    private static void scanMetaAnnotations(MavenProject project, List<MetaAnnotation> candidates, int[] budget) {
+        forEachJavaSource(project, budget, file -> {
+            MetaAnnotation meta = readMetaAnnotation(file);
+            if (meta != null) {
+                candidates.add(meta);
+            }
+        });
+    }
+
     /** Fully qualified names of the annotated top-level classes, sorted. */
     static List<String> annotatedClasses(MavenProject project) {
+        return annotatedClasses(project, Collections.<String>emptySet());
+    }
+
+    /** Fully qualified names of the annotated top-level classes, sorted. */
+    static List<String> annotatedClasses(MavenProject project, Set<String> extraBootAnnotations) {
         Map<String, Boolean> found = new TreeMap<>();
         int[] budget = {MAX_FILES};
+        forEachJavaSource(project, budget, file -> {
+            String main = annotatedClass(file, extraBootAnnotations);
+            if (main != null) {
+                found.put(main, Boolean.TRUE);
+            }
+        });
+        return new ArrayList<>(found.keySet());
+    }
+
+    private interface JavaSourceVisitor {
+        void visit(File file);
+    }
+
+    private static void forEachJavaSource(MavenProject project, int[] budget, JavaSourceVisitor visitor) {
         for (String root : project.getCompileSourceRoots()) {
             File directory = new File(root);
             if (!directory.isAbsolute()) {
                 directory = new File(project.getBasedir(), root);
             }
-            scan(directory.toPath(), found, budget);
-        }
-        return new ArrayList<>(found.keySet());
-    }
-
-    private static void scan(Path root, Map<String, Boolean> found, int[] budget) {
-        if (!Files.isDirectory(root)) {
-            return;
-        }
-        Deque<File> pending = new ArrayDeque<>();
-        pending.push(root.toFile());
-        while (!pending.isEmpty() && budget[0] > 0) {
-            File[] children = pending.pop().listFiles();
-            if (children == null) {
+            Path path = directory.toPath();
+            if (!Files.isDirectory(path)) {
                 continue;
             }
-            for (File child : children) {
-                if (child.isDirectory()) {
-                    pending.push(child);
-                } else if (child.getName().endsWith(".java") && budget[0]-- > 0) {
-                    String main = annotatedClass(child);
-                    if (main != null) {
-                        found.put(main, Boolean.TRUE);
+            Deque<File> pending = new ArrayDeque<>();
+            pending.push(directory);
+            while (!pending.isEmpty() && budget[0] > 0) {
+                File[] children = pending.pop().listFiles();
+                if (children == null) {
+                    continue;
+                }
+                for (File child : children) {
+                    if (child.isDirectory()) {
+                        pending.push(child);
+                    } else if (child.getName().endsWith(".java") && budget[0]-- > 0) {
+                        visitor.visit(child);
                     }
                 }
             }
         }
     }
 
-    /** The class file declares, when its head carries the annotation. */
+    /** The class file declares, when its head carries a recognized Boot annotation. */
     static String annotatedClass(File file) {
-        String text;
+        return annotatedClass(file, Collections.<String>emptySet());
+    }
+
+    /** The class file declares, when its head carries a recognized or custom Boot annotation. */
+    static String annotatedClass(File file, Set<String> extraBootAnnotations) {
+        String raw = readHead(file);
+        if (raw == null || raw.indexOf('@') < 0) {
+            return null;
+        }
+        String text = stripCommentsAndStrings(raw);
+        String simple = file.getName().substring(0, file.getName().length() - ".java".length());
+        Matcher decl = Pattern.compile("(?<!@)\\b(?:class|record)\\s+" + Pattern.quote(simple) + "\\b").matcher(text);
+        if (!decl.find()) {
+            return null;
+        }
+        SourceHeader header = SourceHeader.parse(text, decl.start());
+        Set<String> bootAnnotations = new LinkedHashSet<>(BUILTIN_BOOT_ANNOTATIONS);
+        if (extraBootAnnotations != null) {
+            bootAnnotations.addAll(extraBootAnnotations);
+        }
+        if (header.matchesAny(bootAnnotations)) {
+            return header.qualified(simple);
+        }
+        if (header.matchesAny(Collections.singleton(ENABLE_AUTO_CONFIGURATION)) && hasValidMain(text)) {
+            return header.qualified(simple);
+        }
+        return null;
+    }
+
+    private static MetaAnnotation readMetaAnnotation(File file) {
+        String raw = readHead(file);
+        if (raw == null || !raw.contains("@interface")) {
+            return null;
+        }
+        String text = stripCommentsAndStrings(raw);
+        String simple = file.getName().substring(0, file.getName().length() - ".java".length());
+        Matcher decl = Pattern.compile("@interface\\s+" + Pattern.quote(simple) + "\\b").matcher(text);
+        if (!decl.find()) {
+            return null;
+        }
+        SourceHeader header = SourceHeader.parse(text, decl.start());
+        if (header.annotations.isEmpty()) {
+            return null;
+        }
+        return new MetaAnnotation(header.qualified(simple), header);
+    }
+
+    private static String readHead(File file) {
         try (InputStream input = Files.newInputStream(file.toPath())) {
             byte[] head = new byte[HEAD_BYTES];
             int length = 0;
             for (int read; length < head.length && (read = input.read(head, length, head.length - length)) > 0; ) {
                 length += read;
             }
-            text = new String(head, 0, length, StandardCharsets.UTF_8);
+            return new String(head, 0, length, StandardCharsets.UTF_8);
         } catch (IOException error) {
             return null;
         }
-        if (!text.contains("SpringBootApplication")) {
-            return null;
+    }
+
+    private static boolean hasValidMain(String text) {
+        Matcher matcher = VOID_MAIN.matcher(text);
+        while (matcher.find()) {
+            String parameter = matcher.group(1).trim();
+            if (!parameter.isEmpty() && !STRING_ARG.matcher(parameter).matches()) {
+                continue;
+            }
+            int boundary = Math.max(Math.max(text.lastIndexOf('{', matcher.start()), text.lastIndexOf('}', matcher.start())),
+                    text.lastIndexOf(';', matcher.start()));
+            String prefix = text.substring(boundary + 1, matcher.start());
+            if (!DISALLOWED_MODIFIER.matcher(prefix).find()) {
+                return true;
+            }
         }
-        text = LINE_COMMENT.matcher(BLOCK_COMMENT.matcher(text).replaceAll(" ")).replaceAll(" ");
-        if (!ANNOTATION.matcher(text).find()) {
-            return null;
+        return false;
+    }
+
+    private static String stripCommentsAndStrings(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int length = source.length();
+        for (int index = 0; index < length; index++) {
+            char current = source.charAt(index);
+            char next = index + 1 < length ? source.charAt(index + 1) : '\0';
+            if (current == '/' && next == '/') {
+                while (index < length && source.charAt(index) != '\n') {
+                    index++;
+                }
+                out.append('\n');
+            } else if (current == '/' && next == '*') {
+                index += 2;
+                while (index < length && !(source.charAt(index) == '*' && index + 1 < length && source.charAt(index + 1) == '/')) {
+                    index++;
+                }
+                index++;
+                out.append(' ');
+            } else if (current == '"' || current == '\'') {
+                boolean block = current == '"' && source.startsWith("\"\"\"", index);
+                String close = block ? "\"\"\"" : String.valueOf(current);
+                index += close.length();
+                while (index < length && !source.startsWith(close, index)) {
+                    if (source.charAt(index) == '\\') {
+                        index++;
+                    }
+                    index++;
+                }
+                index += close.length() - 1;
+                out.append(current).append(current);
+            } else {
+                out.append(current);
+            }
         }
-        String simple = file.getName().substring(0, file.getName().length() - ".java".length());
-        if (!Pattern.compile("\\b(?:class|record)\\s+" + Pattern.quote(simple) + "\\b").matcher(text).find()) {
-            return null;
+        return out.toString();
+    }
+
+    private static final class MetaAnnotation {
+        final String fqn;
+        final SourceHeader header;
+
+        MetaAnnotation(String fqn, SourceHeader header) {
+            this.fqn = fqn;
+            this.header = header;
         }
-        Matcher pkg = PACKAGE.matcher(text);
-        return pkg.find() ? pkg.group(1) + "." + simple : simple;
+    }
+
+    private static final class SourceHeader {
+        private static final Pattern ANY_IMPORT = Pattern.compile("^\\s*import\\s+[^;]+;", Pattern.MULTILINE);
+
+        final String pkg;
+        final Map<String, String> explicitImports;
+        final Set<String> wildcardPackages;
+        final List<String> annotations;
+
+        private SourceHeader(String pkg, Map<String, String> explicitImports, Set<String> wildcardPackages, List<String> annotations) {
+            this.pkg = pkg;
+            this.explicitImports = explicitImports;
+            this.wildcardPackages = wildcardPackages;
+            this.annotations = annotations;
+        }
+
+        static SourceHeader parse(String text, int declStart) {
+            int headerEnd = 0;
+            String pkg = "";
+            Matcher pkgMatcher = PACKAGE.matcher(text);
+            if (pkgMatcher.find() && pkgMatcher.end() <= declStart) {
+                pkg = pkgMatcher.group(1);
+                headerEnd = Math.max(headerEnd, pkgMatcher.end());
+            }
+            Matcher allImports = ANY_IMPORT.matcher(text);
+            while (allImports.find() && allImports.end() <= declStart) {
+                headerEnd = Math.max(headerEnd, allImports.end());
+            }
+            Map<String, String> explicit = new LinkedHashMap<>();
+            Set<String> wildcards = new LinkedHashSet<>();
+            Matcher importMatcher = IMPORT_DECL.matcher(text);
+            while (importMatcher.find() && importMatcher.end() <= declStart) {
+                String target = importMatcher.group(1);
+                if (importMatcher.group(2) != null) {
+                    wildcards.add(target);
+                } else {
+                    explicit.put(simpleName(target), target);
+                }
+            }
+            List<String> annotations = new ArrayList<>();
+            Matcher annotationMatcher = ANNOTATION_USE.matcher(text.substring(headerEnd, declStart));
+            while (annotationMatcher.find()) {
+                annotations.add(annotationMatcher.group(1));
+            }
+            return new SourceHeader(pkg, explicit, wildcards, annotations);
+        }
+
+        String qualified(String simple) {
+            return pkg.isEmpty() ? simple : pkg + "." + simple;
+        }
+
+        boolean matchesAny(Set<String> targets) {
+            for (String raw : annotations) {
+                if (raw.indexOf('.') >= 0) {
+                    if (targets.contains(raw)) {
+                        return true;
+                    }
+                    continue;
+                }
+                if (explicitImports.containsKey(raw)) {
+                    if (targets.contains(explicitImports.get(raw))) {
+                        return true;
+                    }
+                    continue;
+                }
+                if (targets.contains(qualified(raw))) {
+                    return true;
+                }
+                for (String pkgWildcard : wildcardPackages) {
+                    if (targets.contains(pkgWildcard + "." + raw)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
     }
 
     private static Plugin plugin(MavenProject project, String groupId, String artifactId) {

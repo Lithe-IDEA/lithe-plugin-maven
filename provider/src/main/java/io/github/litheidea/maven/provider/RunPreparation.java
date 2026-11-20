@@ -73,6 +73,9 @@ final class RunPreparation {
         try {
             command.add("-Dlithe.runOutput=" + output);
             command.add("-Dlithe.runProject=./" + project);
+            if (request.tags.contains(SPRING_BOOT) && !hasPropertyArgument(request.optionArguments, "lithe.runIncludeProvided")) {
+                command.add("-Dlithe.runIncludeProvided=true");
+            }
             if (!".".equals(project)) {
                 command.add("-pl");
                 command.add("./" + project);
@@ -120,7 +123,7 @@ final class RunPreparation {
         Map<String, Object> plan = new LinkedHashMap<>();
         plan.put("executable", executable);
         plan.put("arguments", arguments);
-        plan.put("workingDirectory", request.workingDirectory != null ? request.workingDirectory : request.projectPath);
+        plan.put("workingDirectory", request.workingDirectory != null ? request.workingDirectory : request.root);
         plan.put("environment", request.launchEnvironment);
         return plan;
     }
@@ -344,6 +347,17 @@ final class RunPreparation {
             }
         }
         return result;
+    }
+
+    private static boolean hasPropertyArgument(List<String> arguments, String property) {
+        String prefix = "-D" + property + "=";
+        String bare = "-D" + property;
+        for (String argument : arguments) {
+            if (bare.equals(argument) || argument.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String text(Object value) {
