@@ -98,9 +98,9 @@ brew install maven
 
 | 运行配置 | 来源 | 执行方式 |
 | --- | --- | --- |
-| `spring-boot` | 源码根里带 `@SpringBootApplication` 的类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务 |
+| `spring-boot` | 源码根里带 `@SpringBootApplication`、`@SpringCloudApplication`、反应器内基于它们组合的自定义 `@interface` 元注解，或带有效 `main` 方法的 `@EnableAutoConfiguration` 类（每个一条）；没有这样的类但用了 `spring-boot-maven-plugin` 的模块（一条，主类取插件的 `mainClass` 或 `start-class`） | 服务 |
 | `application` | `exec-maven-plugin` 的 `mainClass` 或 jar 清单 `archive/manifest/mainClass` 写明主类的模块 | 应用 |
-| `main` | 入口运行（`entrypoints: true`）：标题栏选“当前文件”点运行时，提供者回答当前文件里带 `static void main(String[])` 的类，Lithe 把它存成以类名命名的运行配置后运行；POM 里不用写主类 | 应用 |
+| `main` | 入口运行（`entrypoints: true`）：标题栏选“当前文件”点运行时，提供者回答当前文件里带有效 `main` 方法（含 Java 21+/25 非静态无参 `void main()` 及紧凑源文件）的类，Lithe 把它存成以类名命名的运行配置后运行；POM 里不用写主类 | 应用 |
 
 “当前文件”的入口（`lithe/build/runEntrypoints`）只读这一个文件：模块是文件上方最近一个有 `pom.xml` 的目录，类名是包名加文件名，
 测试源码（`src/test/`）不算，因为运行用的运行时类路径里没有测试类。从 1.0.1 起插件需要 Lithe 桌面端 0.8.5 及以上（支持 `buildProviders` 1）。
@@ -110,9 +110,8 @@ brew install maven
 
 1. 用你的 Maven（Lithe 解析出的那个，否则按 `mvnw`、`MAVEN_HOME`、`PATH` 查找）和当前构建选项运行
    `-pl <模块> -am process-classes`，编译这个模块和它依赖的反应堆模块，输出显示在运行窗口。
-2. 扩展在构建结束后写出运行时类路径（模块输出目录加 compile/runtime/system 依赖，兄弟模块用反应堆里的
-   `target/classes`，不需要 `install`）和编译出的主类。
-3. 返回 `java -cp <类路径> <主类>`，由 Lithe 用项目的 JDK 启动并管理这个进程。主类依次取运行配置的入口、
+2. 扩展在构建结束后写出运行时类路径（模块输出目录加 compile/runtime/system 依赖，Spring Boot 与 WAR 模块同时纳入 `provided` 依赖；兄弟模块用反应堆里的 `target/classes`，不需要 `install`；可用 `-Dlithe.runIncludeProvided=false` 覆盖）和编译出的主类（含非静态/无参 `void main()`）。
+3. 返回 `java -cp <类路径> <主类>`，默认在工作区构建根目录（`request.root`，可在运行配置里单独覆盖工作目录）由 Lithe 用项目的 JDK 启动并管理这个进程。主类依次取运行配置的入口、
    target 的 `mainClass`、编译结果里唯一的主类（Spring Boot 优先带注解的类）；有多个时报错并列出候选。
    类路径超过 24 000 个字符时写进 `target/lithe-run/` 下只含清单的 jar，避开 Windows 命令行长度限制。
 4. 清单为 Spring Boot 运行声明了按配置类型连接的调试（`debug.configurationType: java`）：宿主带着调试端口请求时，

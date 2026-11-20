@@ -80,6 +80,7 @@ final class ModelExport {
         List<Object> tasks = new ArrayList<>();
         List<Object> contentRoots = new ArrayList<>();
         List<Object> targets = new ArrayList<>();
+        Set<String> customBootAnnotations = Applications.customBootAnnotations(session.getProjects());
         Map<String, File> aggregators = aggregators();
         for (MavenProject project : session.getProjects()) {
             String path = path(project.getBasedir());
@@ -109,7 +110,7 @@ final class ModelExport {
             if (!"pom".equals(project.getPackaging())) {
                 addContentRoots(project, path, contentRoots);
             }
-            for (Applications.Application application : Applications.of(project)) {
+            for (Applications.Application application : Applications.of(project, customBootAnnotations)) {
                 targets.add(application.target(path));
             }
             addGoals(project, path, tasks);

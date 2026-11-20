@@ -41,6 +41,8 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
     static final String RUN_OUTPUT = "lithe.runOutput";
     /** The project run preparation compiled, relative to the directory Maven runs in. */
     static final String RUN_PROJECT = "lithe.runProject";
+    /** Optional boolean override for including provided dependencies on the runtime classpath. */
+    static final String RUN_INCLUDE_PROVIDED = "lithe.runIncludeProvided";
 
     private final MavenPluginManager pluginManager;
     private final PluginVersionResolver versionResolver;
@@ -92,7 +94,9 @@ public final class LitheLifecycleParticipant extends AbstractMavenLifecycleParti
         if (runOutput == null || runProject == null || session.getResult().hasExceptions()) {
             return;
         }
-        write(runOutput, Json.write(new RunExport(session, dependenciesResolver).document(runProject)));
+        String rawIncludeProvided = property(session, RUN_INCLUDE_PROVIDED);
+        Boolean includeProvided = rawIncludeProvided == null ? null : Boolean.valueOf(rawIncludeProvided);
+        write(runOutput, Json.write(new RunExport(session, dependenciesResolver).document(runProject, includeProvided)));
     }
 
     private static String property(MavenSession session, String key) {

@@ -29,8 +29,12 @@ final class RunEntrypoints {
     static final String RUN = "main";
     private static final long MAX_SOURCE_BYTES = 4L * 1024 * 1024;
     private static final Pattern PACKAGE = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
-    private static final Pattern MAIN = Pattern.compile(
-            "\\bstatic\\s+(?:final\\s+)?void\\s+main\\s*\\(\\s*(?:final\\s+)?String\\s*(?:\\[\\s*]\\s*\\w+|\\.\\.\\.\\s*\\w+|\\w+\\s*\\[\\s*])\\s*\\)");
+    private static final Pattern VOID_MAIN = Pattern.compile(
+            "\\bvoid\\s+main\\s*\\(\\s*([^)]*)\\)\\s*(?:throws\\s+[\\w$.]+(?:\\s*,\\s*[\\w$.]+)*)?\\s*\\{");
+    private static final Pattern STRING_ARG = Pattern.compile(
+            "^(?:final\\s+)?(?:java\\.lang\\.)?String\\s*(?:\\[\\s*]\\s*[\\w$]+|\\.\\.\\.\\s*[\\w$]+|[\\w$]+\\s*\\[\\s*])$");
+    private static final Pattern DISALLOWED_MODIFIER = Pattern.compile("\\b(?:private|abstract|default)\\b");
+    private static final Pattern ANY_TYPE_DECL = Pattern.compile("\\b(?:class|record|enum|interface)\\b");
     private static final Pattern ARTIFACT = Pattern.compile("<artifactId>\\s*([^<\\s]+)\\s*</artifactId>");
     private static final Pattern PARENT = Pattern.compile("<parent>.*?</parent>", Pattern.DOTALL);
 
@@ -61,11 +65,19 @@ final class RunEntrypoints {
         }
         String text = stripComments(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
         String simple = fileName.substring(0, fileName.length() - ".java".length());
-        if (!MAIN.matcher(text).find() || !Pattern.compile("\\b(?:class|record|enum|interface)\\s+" + Pattern.quote(simple) + "\\b").matcher(text).find()) {
+        int mainIndex = firstValidMainIndex(text);
+        if (mainIndex < 0) {
             return answer;
         }
         Matcher pkg = PACKAGE.matcher(text);
-        String className = pkg.find() ? pkg.group(1) + "." + simple : simple;
+        boolean hasPackage = pkg.find();
+        boolean declaresSimple = Pattern.compile("(?<!@)\\b(?:class|record|enum|interface)\\s+" + Pattern.quote(simple) + "\\b")
+                .matcher(text).find();
+        boolean declaresTypeBeforeMain = ANY_TYPE_DECL.matcher(text.substring(0, mainIndex)).find();
+        if (!declaresSimple && (hasPackage || declaresTypeBeforeMain)) {
+            return answer;
+        }
+        String className = declaresSimple && hasPackage ? pkg.group(1) + "." + simple : simple;
         String projectPath = root.relativize(module).toString().replace('\\', '/');
         if (projectPath.isEmpty()) {
             projectPath = ".";
@@ -151,6 +163,23 @@ final class RunEntrypoints {
             }
         }
         return out.toString();
+    }
+
+    private static int firstValidMainIndex(String text) {
+        Matcher matcher = VOID_MAIN.matcher(text);
+        while (matcher.find()) {
+            String parameter = matcher.group(1).trim();
+            if (!parameter.isEmpty() && !STRING_ARG.matcher(parameter).matches()) {
+                continue;
+            }
+            int boundary = Math.max(Math.max(text.lastIndexOf('{', matcher.start()), text.lastIndexOf('}', matcher.start())),
+                    text.lastIndexOf(';', matcher.start()));
+            String prefix = text.substring(boundary + 1, matcher.start());
+            if (!DISALLOWED_MODIFIER.matcher(prefix).find()) {
+                return matcher.start();
+            }
+        }
+        return -1;
     }
 
     private static String stripXmlComments(String xml) {
