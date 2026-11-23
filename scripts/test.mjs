@@ -70,10 +70,12 @@ function expand(list, { project, suite, outputFile }) {
 
 const report = createReport("maven-integration");
 const timeoutMs = mavenTimeout();
+// Clear inherited MAVEN_ARGS so user/runner environment flags cannot leak into Maven invocations.
+const mavenEnv = { ...process.env, MAVEN_ARGS: "" };
 function run(name, root, list, signal, values = {}) {
-  const argv = [...expand(buildSystem.invocation.globalArguments, values), ...expand(list, values)];
+  const argv = [...expand(buildSystem.invocation.globalArguments, values), ...modelSettings(), ...expand(list, values)];
   return report.step(name, () => runCommand(maven, argv, {
-    cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+    cwd: root, env: mavenEnv, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
   }));
 }
 
@@ -82,6 +84,12 @@ function run(name, root, list, signal, values = {}) {
 // but resolves `-pl core` against the working directory as given, so under a
 // short name it finds no selected project. Lithe passes the long path it opened.
 const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
+const emptySettings = join(scratch, "empty-settings.xml");
+writeFileSync(emptySettings, "<settings/>");
+// Both Maven settings files must be isolated from the runner's local installation.
+function modelSettings(userSettings = emptySettings) {
+  return ["-gs", emptySettings, "-s", userSettings];
+}
 const root = join(scratch, "reactor");
 const outputs = join(scratch, "outputs");
 const captureDir = process.env.LITHE_CAPTURE_DIR;
@@ -123,12 +131,12 @@ async function document(name, declaration, signal, values = {}) {
  * project's JDK.
  */
 async function prepareRuns(signal) {
-  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], timeoutMs: timeoutMs });
+  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], env: mavenEnv, timeoutMs: timeoutMs });
   try {
     await report.step("start the build provider", () => client.initialize(root));
     let operation = 0;
     const request = (target, extra = {}) => client.request("lithe/build/prepareRun", {
-      operationID: `run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      operationID: `run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: modelSettings(), environment: {},
       tool: { executable: maven }, run: target.tags.includes("spring-boot") ? "spring-boot" : "application",
       project: { name: target.path, path: target.path }, target, userArguments: ["typed"], ...extra,
     });
@@ -283,19 +291,17 @@ async function test(signal) {
     });
 
     const profileRoot = join(scratch, "profiles-reactor");
-    const emptySettings = join(scratch, "profile-empty-settings.xml");
-    writeFileSync(emptySettings, "<settings/>");
     const readProfileModel = async (tag, profileArg, settings = emptySettings) => {
       const outputFile = join(outputs, `profiles-${tag}.json`);
       const extra = profileArg ? ["-P", profileArg] : [];
       const argv = [
         ...expand(buildSystem.invocation.globalArguments, { outputFile }),
-        "-gs", emptySettings, "-s", settings,
+        ...modelSettings(settings),
         ...extra,
         ...expand(buildSystem.model.arguments, { outputFile }),
       ];
       await runCommand(maven, argv, {
-        cwd: profileRoot, env: { ...process.env, MAVEN_ARGS: "" },
+        cwd: profileRoot, env: mavenEnv,
         stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
       });
       return JSON.parse(readFileSync(outputFile, "utf8"));
@@ -491,8 +497,8 @@ async function test(signal) {
 
     await check("without Lithe's properties the extension does nothing", async () => {
       rmSync(join(root, "core", "target"), { recursive: true, force: true });
-      await runCommand(maven, ["-B", "-ntp", "-q", `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
-        cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+      await runCommand(maven, ["-B", "-ntp", "-q", ...modelSettings(), `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
+        cwd: root, env: mavenEnv, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
       });
     });
 
@@ -640,7 +646,7 @@ async function verifyExtendedBootAndProvided(signal) {
     ]);
   });
 
-  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], timeoutMs: timeoutMs });
+  const client = new BackendClient({ jar: join(pluginDir, "lib", "lithe-maven-provider.jar"), args: [], env: mavenEnv, timeoutMs: timeoutMs });
   try {
     await report.step("start provider for extended boot and Java 21 entrypoints", () => client.initialize(extRoot));
     let operation = 0;
@@ -663,26 +669,26 @@ async function verifyExtendedBootAndProvided(signal) {
     rmSync(join(extRoot, compactFile));
 
     const bootProvided = await client.request("lithe/build/prepareRun", {
-      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: modelSettings(), environment: {},
       tool: { executable: maven }, run: "spring-boot", project: { name: "apps", path: "apps" },
       target: { name: "CustomMetaApp", path: "apps", tags: ["spring-boot"], properties: { mainClass: "demo.apps.CustomMetaApp" } },
       userArguments: [],
     });
     const bootNoProvided = await client.request("lithe/build/prepareRun", {
       operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {},
-      optionArguments: ["-Dlithe.runIncludeProvided=false"], environment: {},
+      optionArguments: [...modelSettings(), "-Dlithe.runIncludeProvided=false"], environment: {},
       tool: { executable: maven }, run: "spring-boot", project: { name: "apps", path: "apps" },
       target: { name: "CustomMetaApp", path: "apps", tags: ["spring-boot"], properties: { mainClass: "demo.apps.CustomMetaApp" } },
       userArguments: [],
     });
     const customBootDiscovered = await client.request("lithe/build/prepareRun", {
-      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: modelSettings(), environment: {},
       tool: { executable: maven }, run: "spring-boot", project: { name: "custom-boot", path: "custom-boot" },
       target: { name: "HelperMain", path: "custom-boot", tags: ["spring-boot"], properties: {} },
       userArguments: [],
     });
     const plainPrepared = await client.request("lithe/build/prepareRun", {
-      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: [], environment: {},
+      operationID: `ext-run-${++operation}`, buildSystemID: "maven", root: ".", options: {}, optionArguments: modelSettings(), environment: {},
       tool: { executable: maven }, run: "application", project: { name: "plain", path: "plain" },
       target: { name: "InstanceVoidMain", path: "plain", tags: ["java-application"], properties: {} },
       userArguments: [],
