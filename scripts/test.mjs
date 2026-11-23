@@ -71,9 +71,9 @@ function expand(list, { project, suite, outputFile }) {
 const report = createReport("maven-integration");
 const timeoutMs = mavenTimeout();
 function run(name, root, list, signal, values = {}) {
-  const argv = [...expand(buildSystem.invocation.globalArguments, values), ...expand(list, values)];
+  const argv = [...expand(buildSystem.invocation.globalArguments, values), ...modelSettings(), ...expand(list, values)];
   return report.step(name, () => runCommand(maven, argv, {
-    cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+    cwd: root, env: { ...process.env, MAVEN_ARGS: "" }, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
   }));
 }
 
@@ -82,6 +82,12 @@ function run(name, root, list, signal, values = {}) {
 // but resolves `-pl core` against the working directory as given, so under a
 // short name it finds no selected project. Lithe passes the long path it opened.
 const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "lithe-maven-test-")));
+const emptySettings = join(scratch, "empty-settings.xml");
+writeFileSync(emptySettings, "<settings/>");
+// Both Maven settings files must be isolated from the runner's local installation.
+function modelSettings(userSettings = emptySettings) {
+  return ["-gs", emptySettings, "-s", userSettings];
+}
 const root = join(scratch, "reactor");
 const outputs = join(scratch, "outputs");
 const captureDir = process.env.LITHE_CAPTURE_DIR;
@@ -283,14 +289,12 @@ async function test(signal) {
     });
 
     const profileRoot = join(scratch, "profiles-reactor");
-    const emptySettings = join(scratch, "profile-empty-settings.xml");
-    writeFileSync(emptySettings, "<settings/>");
     const readProfileModel = async (tag, profileArg, settings = emptySettings) => {
       const outputFile = join(outputs, `profiles-${tag}.json`);
       const extra = profileArg ? ["-P", profileArg] : [];
       const argv = [
         ...expand(buildSystem.invocation.globalArguments, { outputFile }),
-        "-gs", emptySettings, "-s", settings,
+        ...modelSettings(settings),
         ...extra,
         ...expand(buildSystem.model.arguments, { outputFile }),
       ];
@@ -491,8 +495,8 @@ async function test(signal) {
 
     await check("without Lithe's properties the extension does nothing", async () => {
       rmSync(join(root, "core", "target"), { recursive: true, force: true });
-      await runCommand(maven, ["-B", "-ntp", "-q", `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
-        cwd: root, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
+      await runCommand(maven, ["-B", "-ntp", "-q", ...modelSettings(), `-Dmaven.ext.class.path=${pluginDir}/lib/lithe-maven-extension.jar`, "validate"], {
+        cwd: root, env: { ...process.env, MAVEN_ARGS: "" }, stdio: ["ignore", "ignore", "inherit"], timeoutMs, signal,
       });
     });
 
