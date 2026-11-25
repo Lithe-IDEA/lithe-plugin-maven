@@ -77,13 +77,15 @@
         },
         {
           "id": "settingsFile",
-          "displayName": "Settings File",
+          "displayName": "User settings file (settings.xml)",
+          "description": "Override the user settings file for this workspace with Maven’s -s option.",
           "kind": "file",
           "arguments": ["-s", "${value}"]
         },
         {
           "id": "localRepository",
-          "displayName": "Local Repository",
+          "displayName": "Local repository directory",
+          "description": "Override the local repository for this workspace with -Dmaven.repo.local.",
           "kind": "directory",
           "arguments": ["-Dmaven.repo.local=${value}"]
         },
