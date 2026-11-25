@@ -83,5 +83,17 @@
         }
       }
     }
+  },
+  "buildOptions": {
+    "maven": {
+      "settingsFile": {
+        "displayName": "用户设置文件（settings.xml）",
+        "description": "使用 Maven 的 -s 参数为当前工作区指定用户设置文件。"
+      },
+      "localRepository": {
+        "displayName": "本地仓库目录",
+        "description": "使用 -Dmaven.repo.local 为当前工作区指定本地仓库目录。"
+      }
+    }
   }
 }
