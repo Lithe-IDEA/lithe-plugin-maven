@@ -73,7 +73,7 @@
           "choicesFromModel": true,
           "allowCustom": true,
           "presentation": "tree",
-          "arguments": ["-P", "${value}"]
+          "arguments": ["-P=${value}"]
         },
         {
           "id": "settingsFile",
@@ -350,8 +350,7 @@
               "kind": "text",
               "placeholder": "dev, -integration",
               "arguments": [
-                "-P",
-                "${value}"
+                "-P=${value}"
               ]
             },
             {
