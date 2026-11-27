@@ -63,7 +63,7 @@ JDT 侧的项目导入归 Java Support 插件维护。
 
 ## java-maven-profiles-dependencies
 
-**能力**：构建选项 Profiles 传 `-P <profile>`，候选值从反应堆、父 POM 和 `settings.xml` 读取，也可以手动补充；
+**能力**：构建选项 Profiles 传 `-P=<profiles>`，候选值从反应堆、父 POM 和 `settings.xml` 读取，也可以手动补充；
 随包 Maven 扩展用 Maven 自身的 `ProfileSelector` 计算应用 Lithe 覆盖前的默认 Profile（含 `.mvn/maven.config` 中的启用和禁用、`settings.xml`、条件激活以及 Maven 3.9 的 `packaging` 条件）写入 `optionDefaults.profiles`。当前反应堆实际激活的 Profile 由 Maven 项目模型提供，写入 `optionActiveChoices.profiles`，包括 `settings.xml` 和命令行同时激活的选项。扩展还输出 `optionExcludePrefixes.profiles = "-"`，支持在 Build 工具窗口树、构建选项和运行配置里勾选启用或以 `-<profile>` 显式取消默认激活 Profile；
 依赖树显示整个反应堆或单个模块的依赖（含作用域和传递依赖），反应堆内未安装的兄弟模块也能解析。
 

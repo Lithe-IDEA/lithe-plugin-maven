@@ -39,7 +39,7 @@
 
 | 选项 | 传给 Maven 的内容 |
 | --- | --- |
-| Profiles | `-P <profile>`；候选值从反应堆、父 POM 和 settings.xml 读取，也可以手动补充 |
+| Profiles | `-P=<profiles>`；候选值从反应堆、父 POM 和 settings.xml 读取，也可以手动补充 |
 | Settings File | `-s <文件>` |
 | Local Repository | `-Dmaven.repo.local=<目录>` |
 | Offline | `-o`，声明为工具栏开关 |

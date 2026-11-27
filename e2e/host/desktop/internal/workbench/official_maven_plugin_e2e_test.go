@@ -337,7 +337,7 @@ func TestOfficialMavenPluginBuildsAReactor(t *testing.T) {
 // TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree installs the Maven Build archive,
 // verifies a Profile enabled by .mvn/maven.config appears checked in the Build tool window,
 // toggles from dev to prod through the real checkbox UI, and checks that model reload,
-// compile and project reopen all honor -P -dev,prod.
+// compile and project reopen all honor -P=-dev,prod.
 func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
 	archive := os.Getenv("LITHE_TEST_MAVEN_PLUGIN_ARCHIVE")
 	if archive == "" {
@@ -424,7 +424,7 @@ func TestOfficialMavenPluginSwitchesActiveProfilesInBuildTree(t *testing.T) {
 		t.Fatalf("inactive dev-mod was compiled: %v", err)
 	}
 
-	// Reopening the workspace keeps -P -dev,prod on cold start before decodeModel runs.
+	// Reopening the workspace keeps -P=-dev,prod on cold start before decodeModel runs.
 	h.app.closeProject()
 	awaitStateWithin(t, h, 30*time.Second, "the closed project", func() bool { return h.app.project == nil })
 	h.open(root)
